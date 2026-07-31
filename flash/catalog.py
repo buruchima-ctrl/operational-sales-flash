@@ -114,6 +114,20 @@ class DataAccess(object):
         self._traffic = None
         self._comp_set_cache = {}
         self._comp_elig_cache = {}
+        # Read-through memos. Semantics are unchanged — every one of these is a
+        # pure function of (day, scope) over an immutable database. They exist
+        # because a 60-day archive walks YTD windows for every day, and the
+        # same scope aggregate is otherwise recomputed thousands of times.
+        self._entity_by_id = None
+        self._scope_cache = {}
+        self._agg_cache = {}
+
+    @staticmethod
+    def _skey(scope):
+        """A hashable, order-independent key for a scope dict."""
+        return tuple(sorted(
+            (k, tuple(v) if isinstance(v, (list, tuple, set)) else v)
+            for k, v in scope.items()))
 
     # =====================================================================
     # Dimensions
@@ -134,10 +148,9 @@ class DataAccess(object):
         return self._entities
 
     def entity(self, entity_id) -> dict:
-        for e in self.entities():
-            if e["entity_id"] == entity_id:
-                return e
-        raise KeyError(entity_id)
+        if self._entity_by_id is None:
+            self._entity_by_id = {e["entity_id"]: e for e in self.entities()}
+        return self._entity_by_id[entity_id]
 
     def brands(self) -> List[dict]:
         if self._brands is None:
@@ -221,6 +234,15 @@ class DataAccess(object):
 
     def _scope_entities(self, **scope) -> List[dict]:
         self._check_scope(scope)
+        key = self._skey(scope)
+        hit = self._scope_cache.get(key)
+        if hit is not None:
+            return hit
+        out = self._scope_entities_uncached(**scope)
+        self._scope_cache[key] = out
+        return out
+
+    def _scope_entities_uncached(self, **scope) -> List[dict]:
         eids = scope.get("entity_ids")
         eids = set(eids) if eids else None
         out = []
@@ -415,6 +437,15 @@ class DataAccess(object):
     def net_sales(self, day: D, **scope) -> float:
         """#1 Net Sales (day) = Σ net_sales over REPORTED entities in scope,
         in reporting currency. ECOM contributes demand, labeled (BR-4)."""
+        key = ("net", day, self._skey(scope))
+        hit = self._agg_cache.get(key)
+        if hit is not None:
+            return hit
+        out = self._net_sales_uncached(day, **scope)
+        self._agg_cache[key] = out
+        return out
+
+    def _net_sales_uncached(self, day: D, **scope) -> float:
         total = 0.0
         for eid in self.scope_ids(**scope):
             v = self.net_sales_of(eid, day)
@@ -466,6 +497,16 @@ class DataAccess(object):
     def comp_pair(self, day: D, ly_override: Optional[D] = None,
                   **scope) -> Dict[str, object]:
         """The two sides behind #2, so callers never re-sum them themselves."""
+        key = ("comppair", day, ly_override, self._skey(scope))
+        hit = self._agg_cache.get(key)
+        if hit is not None:
+            return hit
+        out = self._comp_pair_uncached(day, ly_override, **scope)
+        self._agg_cache[key] = out
+        return out
+
+    def _comp_pair_uncached(self, day: D, ly_override=None,
+                            **scope) -> Dict[str, object]:
         ly_day = ly_override or self.ly_date(day)
         members = self.comp_set(day, ly_override, **scope)
         ty_raw = sum(self.net_sales_of(m, day) for m in members)
@@ -540,6 +581,15 @@ class DataAccess(object):
         `ast` and `aus` are the FIELD names for `aov` and `aur` (BRD §4.9) —
         the same computation emitted twice under two labels, never computed a
         second time. That is the whole point of naming them here."""
+        key = ("basket", day, self._skey(scope))
+        hit = self._agg_cache.get(key)
+        if hit is not None:
+            return hit
+        out = self._basket_uncached(day, **scope)
+        self._agg_cache[key] = out
+        return out
+
+    def _basket_uncached(self, day: D, **scope) -> Dict[str, object]:
         ids = self.scope_ids(**scope)
         net = self.net_sales(day, **scope)
         txns = self._sum_col("transactions", day, ids)
@@ -597,6 +647,15 @@ class DataAccess(object):
         """Reported actual and its matching DAY-grain plan — the two sides
         behind #3. Only DAY-grain entities take part; the others are reported
         by plan_status()."""
+        key = ("planpair", day, self._skey(scope))
+        hit = self._agg_cache.get(key)
+        if hit is not None:
+            return hit
+        out = self._plan_pair_uncached(day, **scope)
+        self._agg_cache[key] = out
+        return out
+
+    def _plan_pair_uncached(self, day: D, **scope) -> Dict[str, float]:
         actual = plan = 0.0
         for eid in self.scope_ids(**scope):
             if self.plan_grain_of(eid) != "DAY":
@@ -794,6 +853,15 @@ class DataAccess(object):
 
         Where traffic is missing the answer is `None` = UNAVAILABLE. It is
         never 0%: the flash says "no traffic posted" and names the door."""
+        key = ("conv", day, self._skey(scope))
+        hit = self._agg_cache.get(key)
+        if hit is not None:
+            return hit
+        out = self._conversion_uncached(day, **scope)
+        self._agg_cache[key] = out
+        return out
+
+    def _conversion_uncached(self, day: D, **scope) -> Dict[str, object]:
         ly = self.ly_date(day)
         ids = self._traffic_scope_ids(**scope)
         ty_t = ty_x = 0
@@ -865,6 +933,15 @@ class DataAccess(object):
         The identity net = gross − discounts − returns is seeded to hold to the
         cent per row and is re-asserted here for the scope, so a rollup can
         never present three numbers that do not add up."""
+        key = ("gross", day, self._skey(scope))
+        hit = self._agg_cache.get(key)
+        if hit is not None:
+            return hit
+        out = self._gross_pack_uncached(day, **scope)
+        self._agg_cache[key] = out
+        return out
+
+    def _gross_pack_uncached(self, day: D, **scope) -> Dict[str, object]:
         gross = disc = ret = net = 0.0
         for eid in self.scope_ids(**scope):
             row = self.sales_row(eid, day)

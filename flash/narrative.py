@@ -87,6 +87,61 @@ def _why_sentence(obj) -> Optional[str]:
     return "%s%s." % (body[0].upper() + body[1:], "")
 
 
+def compose_ops(obj) -> str:
+    """The operational narrative — at most four sentences.
+
+    The executive flash gets three: what happened, why, what to watch. The
+    operational flash earns a fourth because it carries three layers the
+    executive one refuses (omni, customer, merchandise) and a reader who has to
+    click into a panel to discover a category is sliding has been failed by the
+    summary. The fourth sentence is dropped when none of those layers has
+    anything to say, so a quiet day still reads short.
+
+    Everything here is a template over numbers that already exist on the
+    object. No sentence is emitted without a number in it.
+    """
+    parts = [_headline_sentence(obj)]
+    why = _why_sentence(obj)
+    if why:
+        parts.append(why)
+    layer = _layer_sentence(obj)
+    if layer:
+        parts.append(layer)
+    care = _disclosure_sentence(obj)
+    if care:
+        parts.append(care)
+    return " ".join(parts[:4])
+
+
+def _layer_sentence(obj) -> Optional[str]:
+    """One sentence for the operational layers, chosen by a fixed priority so
+    the same day always yields the same sentence."""
+    clauses = []
+    cats = [e for e in obj["exceptions"] if e["kind"] == "category"]
+    if cats:
+        clauses.append(cats[0]["title"].rstrip("."))
+    omni_exc = [e for e in obj["exceptions"] if e["kind"] == "omni"]
+    if omni_exc:
+        clauses.append(omni_exc[0]["title"].rstrip("."))
+    conv = [e for e in obj["exceptions"] if e["kind"] == "conversion"]
+    if conv and len(clauses) < 2:
+        clauses.append(conv[0]["title"].rstrip("."))
+    ntf = [e for e in obj["exceptions"] if e["kind"] == "new_to_file"]
+    if ntf and len(clauses) < 2:
+        clauses.append(ntf[0]["title"].rstrip("."))
+    if not clauses:
+        d = obj["display"] if "display" in obj else None
+        pen = obj["omni"]["penetration"]["penetration"]
+        ntf_share = obj["customer"]["day"]["ty"]["pct_new_to_file"]
+        if pen is None or ntf_share is None:
+            return None
+        return ("Omni explained %s of the day's sales and %s of buyers were "
+                "new to the file, both inside their thresholds."
+                % (fmt.pct_plain(pen, 1), fmt.pct_plain(ntf_share)))
+    body = "; ".join(clauses)
+    return body[0].upper() + body[1:] + "."
+
+
 def _disclosure_sentence(obj) -> Optional[str]:
     """One sentence for the most material caveat, chosen by a fixed priority so
     the same day always yields the same sentence."""

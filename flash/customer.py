@@ -39,6 +39,15 @@ def _new_index(da):
     return da._cust_idx
 
 
+def _first_dates(da):
+    """customer_id -> first_purchase_date, loaded once. A ~117K-row scan run
+    four times a day across a 60-day archive is 28M rows of nothing."""
+    if getattr(da, "_first_dates", None) is None:
+        da._first_dates = dict(da.conn.execute(
+            "SELECT customer_id, first_purchase_date FROM customer"))
+    return da._first_dates
+
+
 def buyers(da, day: D, **scope) -> Dict[str, object]:
     """#25 New buyers / total buyers / % new-to-file for one day."""
     idx = _new_index(da)
@@ -137,8 +146,7 @@ def omni_new_buyers(da, day: D, family: str, **scope) -> Dict[str, object]:
     by_created, by_fulfilled = omni._omni_index(da)
     ids = set(da.scope_ids(**da._narrow(scope, channel="STORE")))
     iso = day.isoformat()
-    firsts = dict(da.conn.execute(
-        "SELECT customer_id, first_purchase_date FROM customer"))
+    firsts = _first_dates(da)
     seen, new = set(), set()
     for r in by_fulfilled.get((iso, family), []):
         if r["store_id"] not in ids:

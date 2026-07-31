@@ -56,10 +56,18 @@ def _lines(da, day: D, ids) -> List[tuple]:
     """(sku_id, category, brand_id, entity_id, net_sales_local, units)."""
     if not ids:
         return []
+    key = (day, tuple(ids))
+    if getattr(da, "_lines_cache", None) is None:
+        da._lines_cache = {}
+    hit = da._lines_cache.get(key)
+    if hit is not None:
+        return hit
     q = ("SELECT l.sku_id, p.category, p.brand_id, l.entity_id, l.net_sales, "
          "l.units FROM sales_line l JOIN product p ON p.sku_id=l.sku_id "
          "WHERE l.date=? AND l.entity_id IN (%s)" % ",".join("?" * len(ids)))
-    return da.conn.execute(q, [day.isoformat()] + list(ids)).fetchall()
+    out = da.conn.execute(q, [day.isoformat()] + list(ids)).fetchall()
+    da._lines_cache[key] = out
+    return out
 
 
 # =========================================================================
@@ -69,6 +77,18 @@ def _lines(da, day: D, ids) -> List[tuple]:
 def category_day(da, day: D, **scope) -> Dict[str, object]:
     """#27 for one day: sales, mix, LY-aligned comp on the COMP entity set,
     and a derived category plan (disclosed as derived, never as planned)."""
+    key = ("catday", day, da._skey(scope))
+    if getattr(da, "_merch_cache", None) is None:
+        da._merch_cache = {}
+    hit = da._merch_cache.get(key)
+    if hit is not None:
+        return hit
+    out = _category_day_uncached(da, day, **scope)
+    da._merch_cache[key] = out
+    return out
+
+
+def _category_day_uncached(da, day: D, **scope) -> Dict[str, object]:
     if not has_detail(da, day):
         return _unavailable(da, day, "category_day")
     ly = da.ly_date(day)
