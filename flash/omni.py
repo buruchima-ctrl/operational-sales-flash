@@ -469,14 +469,20 @@ def omni_exceptions(da, day: D, **scope) -> List[dict]:
         pct = f["recognized_pct_vs_ly"]
         if pct is not None and abs(pct) >= thr:
             out.append({"family": fam, "label": FAMILY_LABEL[fam],
-                        "basis": "recognized", "pct_vs_ly": pct,
-                        "threshold": thr,
+                        "basis": "recognized", "metric": "recognized sales",
+                        "pct_vs_ly": pct, "threshold": thr,
+                        "good_is_up": True,
                         "direction": "adverse" if pct < 0 else "favourable"})
     b = boris_day(da, day, **scope)
     if b["pct_vs_ly"] is not None and abs(b["pct_vs_ly"]) >= thr:
+        # For a returns family the sign is inverted: more merchandise coming
+        # back is the adverse move. `good_is_up` states that rather than
+        # leaving every consumer to remember it.
         out.append({"family": "BORIS", "label": "Buy Online, Return In Store",
-                    "basis": "recognized", "pct_vs_ly": b["pct_vs_ly"],
-                    "threshold": thr,
+                    "basis": "recognized",
+                    "metric": "merchandise returned in store",
+                    "pct_vs_ly": b["pct_vs_ly"], "threshold": thr,
+                    "good_is_up": False,
                     "direction": "adverse" if b["pct_vs_ly"] > 0 else "favourable"})
     out.sort(key=lambda r: (r["pct_vs_ly"], r["family"]))
     return out

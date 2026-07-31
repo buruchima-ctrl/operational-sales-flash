@@ -338,23 +338,45 @@ SEVERITY_ORDER = {"escalation": 0, "adverse": 1, "watch": 2, "favourable": 3}
 
 
 def _exc(kind, severity, title, detail, href=None, rule=None, value=None,
-         threshold=None, entities=None):
+         threshold=None, entities=None, driver=None, subject=None):
+    """`subject` names what the exception is about — ("category", "Fragrance"),
+    ("omni", "BOPIS"), ("channel", "ECOM") — so a consumer never has to parse
+    it back out of the title. A headline that re-derives its subject from
+    display text is one wording change away from silently pointing at the
+    wrong thing."""
     return {
         "kind": kind, "severity": severity, "title": title, "detail": detail,
         "href": href, "rule": rule, "value": value, "threshold": threshold,
-        "entities": sorted(entities or []),
+        "entities": sorted(entities or []), "driver": driver,
+        "subject": subject,
     }
 
 
 def build_exceptions(da, day: D, omni_mod, customer_mod, merch_mod,
                      **scope) -> List[dict]:
+    """Memoised per (day, scope): thirteen persona views all filter the same
+    fleet list, and rebuilding it thirteen times produced thirteen identical
+    answers at thirteen times the cost."""
+    key = (day, da._skey(scope))
+    if getattr(da, "_exc_cache", None) is None:
+        da._exc_cache = {}
+    hit = da._exc_cache.get(key)
+    if hit is None:
+        hit = _build_exceptions_uncached(da, day, omni_mod, customer_mod,
+                                         merch_mod, **scope)
+        da._exc_cache[key] = hit
+    return hit
+
+
+def _build_exceptions_uncached(da, day: D, omni_mod, customer_mod, merch_mod,
+                               **scope) -> List[dict]:
     """The day's calls to action, in one list, most urgent first.
 
     Ordering is severity then a stable key, never insertion order — two runs of
     the same day must produce the same list in the same order (NFR-2).
     """
     out: List[dict] = []
-    out += _late_poster_exceptions(da, day)
+    out += _late_poster_exceptions(da, day, **scope)
     out += _two_day_negative_comp(da, day, **scope)
     out += _omni_exceptions(da, day, omni_mod, **scope)
     out += _category_exceptions(da, day, merch_mod, **scope)
@@ -366,9 +388,9 @@ def build_exceptions(da, day: D, omni_mod, customer_mod, merch_mod,
     return out
 
 
-def _late_poster_exceptions(da, day: D) -> List[dict]:
+def _late_poster_exceptions(da, day: D, **scope) -> List[dict]:
     out = []
-    for lp in da.late_posters(day):
+    for lp in da.late_posters(day, **scope):
         if not lp["escalate"]:
             continue
         out.append(_exc(
@@ -412,13 +434,15 @@ def _omni_exceptions(da, day: D, omni_mod, **scope) -> List[dict]:
     for e in omni_mod.omni_exceptions(da, day, **scope):
         out.append(_exc(
             "omni", "adverse" if e["direction"] == "adverse" else "favourable",
-            "%s %s vs LY" % (e["label"], fmt.pct(e["pct_vs_ly"])),
+            "%s — %s %s vs LY" % (e["label"], e["metric"],
+                                  fmt.pct(e["pct_vs_ly"])),
             "Recognized basis, %s vs the day-aligned LY — beyond the ±%s "
             "family threshold. Recognized and all-inclusive are separate "
             "series and are never mixed (BR-10)."
             % (fmt.pct(e["pct_vs_ly"]), fmt.pct_plain(e["threshold"], 0)),
             href="omni/%s/%s.html" % (e["family"], day.isoformat()),
-            rule="BR-10", value=e["pct_vs_ly"], threshold=e["threshold"]))
+            rule="BR-10", value=e["pct_vs_ly"], threshold=e["threshold"],
+            subject=("omni", e["family"], e["good_is_up"])))
     return out
 
 
@@ -431,7 +455,8 @@ def _category_exceptions(da, day: D, merch_mod, **scope) -> List[dict]:
             "category", "adverse", e["message"],
             "Adverse SKUs: %s." % skus if skus else "No SKU detail available.",
             href="category/%s/%s.html" % (_slug(e["category"]), day.isoformat()),
-            rule="BR-11", value=e["gap_pts"], threshold=e["threshold_pts"]))
+            rule="BR-11", value=e["gap_pts"], threshold=e["threshold_pts"],
+            subject=("category", e["category"])))
     return out
 
 
@@ -451,7 +476,8 @@ def _ntf_exceptions(da, day: D, customer_mod, **scope) -> List[dict]:
             "4-week baseline by more than %s."
             % (e["message"], fmt.pct_plain(e["threshold_pts"], 0)),
             href="customer/%s.html" % day.isoformat(),
-            rule="BR-12", value=e["gap_pts"], threshold=e["threshold_pts"]))
+            rule="BR-12", value=e["gap_pts"], threshold=e["threshold_pts"],
+            subject=("channel", ch["channel"])))
     return out
 
 
@@ -481,15 +507,23 @@ def _conversion_exceptions(da, day: D, **scope) -> List[dict]:
         bp = (cur["conversion"] - baseline) * 10000.0
         if bp > -thr_bp:
             continue
+        move = da.conversion_window_move(day, "WTD", entity_id=eid)
+        # The title states no basis-point figure on purpose. The threshold is
+        # measured in bp against the door's own baseline, but a bp number is a
+        # conversion MOVEMENT, and BR-22 says a movement travels with its
+        # drivers. The baseline comparison is stated as two levels instead, and
+        # the only bp figure on the line is the vs-LY move, which carries them.
         out.append(_exc(
             "conversion", "adverse",
-            "%s conversion %d bp below its own baseline" % (e["name"], round(bp)),
-            "WTD conversion %s against a trailing 4-week baseline of %s on "
-            "traffic of %s. Traffic is not the problem — the door is."
+            "%s conversion below its own baseline" % e["name"],
+            "WTD conversion %s against a trailing 4-week baseline of %s. "
+            "Against last year, %s — so this is an execution move, not a "
+            "footfall one, and it is coachable."
             % (fmt.pct_plain(cur["conversion"], 2), fmt.pct_plain(baseline, 2),
-               fmt.count(cur["traffic"])),
+               move["annotation"]),
             href="store/%s/tree/%s.html" % (eid, day.isoformat()),
-            rule="BR-15", value=bp, threshold=-thr_bp, entities=[eid]))
+            rule="BR-15", value=bp, threshold=-thr_bp, entities=[eid],
+            driver=move["annotation"]))
     out.sort(key=lambda x: (x["value"], x["entities"]))
     return out[:5]
 
@@ -543,6 +577,293 @@ def _upt_exceptions(da, day: D, **scope) -> List[dict]:
     adverse.sort(key=lambda x: (x["value"], x["entities"]))
     favourable.sort(key=lambda x: (-x["value"], x["entities"]))
     return adverse[:5] + favourable[:3]
+
+
+# =========================================================================
+# Persona headline blocks — needs attention / worth celebrating
+# =========================================================================
+#
+# RANKING RULE, stated once and applied to every item type:
+#
+#   items are ranked by the ABSOLUTE DOLLAR IMPACT of the move they name,
+#   measured against the day-aligned LY, in the reporting currency, restricted
+#   to the persona's own scope.
+#
+# One rule for doors, categories, omni families and customer signals, so a
+# Region page and the Corporate page order the same two items the same way and
+# neither has to explain itself. A door that has not posted is scored on the
+# money its own trailing four same-weekday averages say is unaccounted for —
+# the honest size of "we do not know", rather than zero.
+#
+# A celebration is a threshold-clearing favourable move, never editorial: it
+# comes from the same machinery, the same thresholds and the same catalog
+# calls as an exception. The only difference is the sign.
+
+HEADLINE_MAX = 3
+
+
+def _item(kind, key, label, severity, headline, move, driver, impact,
+          href, rule, ty=None, ly=None, entities=None):
+    return {
+        "kind": kind, "key": key, "label": label, "severity": severity,
+        "headline": headline, "move": move, "driver": driver,
+        "impact": round(abs(impact or 0.0), 2),
+        "impact_signed": round(impact or 0.0, 2),
+        "href": href, "rule": rule, "ty": ty, "ly": ly,
+        "entities": sorted(entities or ([key] if kind == "door" else [])),
+    }
+
+
+def build_headlines(da, day: D, omni_mod, customer_mod, merch_mod,
+                    **scope) -> Dict[str, object]:
+    """The two blocks every persona landing opens with.
+
+    Scope-filtered from one fleet-wide computation (BR-18) — a persona never
+    gets its own arithmetic, only its own slice of the same arithmetic."""
+    # Scoped, not filtered. Filtering a fleet list gives a Canada page a
+    # headline that says "Makeup comps −6.2%" over a move that reads +16.9%,
+    # because the title came from the fleet and the figure came from Canada.
+    # Building the exceptions in the persona's own scope makes that
+    # impossible — the title and the move are the same computation.
+    exceptions = build_exceptions(da, day, omni_mod, customer_mod, merch_mod,
+                                  **scope)
+    attention, celebration = [], []
+
+    for e in exceptions:
+        item = _item_from_exception(da, day, e, omni_mod, customer_mod,
+                                    merch_mod, **scope)
+        if item is None:
+            continue
+        (attention if e["severity"] in ("escalation", "adverse")
+         else celebration).append(item)
+
+    attention += _band_movers(da, day, "adverse", **scope)
+    celebration += _band_movers(da, day, "favourable", **scope)
+    attention += _plan_movers(da, day, "adverse", **scope)
+    celebration += _plan_movers(da, day, "favourable", **scope)
+
+    attention = _rank(attention)
+    claimed = set()
+    for it in attention:
+        claimed.update(it["entities"] or [it["key"]])
+    celebration = _rank([c for c in celebration
+                         if not (set(c["entities"] or [c["key"]]) & claimed)])
+    return {
+        "attention": attention[:HEADLINE_MAX],
+        "celebration": celebration[:HEADLINE_MAX],
+        "max_items": HEADLINE_MAX,
+        "ranking_rule": (
+            "Ranked by the absolute dollar impact of the move against the "
+            "day-aligned LY, in %s, within this view's own scope. One rule for "
+            "doors, categories, omni families and customer signals, so no two "
+            "views order the same pair differently."
+            % da.reporting_currency),
+        "celebration_rule": (
+            "A celebration is a threshold-clearing favourable move — the same "
+            "machinery, thresholds and catalog calls as an exception, with the "
+            "sign reversed. Nothing here is chosen editorially."),
+    }
+
+
+def _rank(items):
+    """Highest dollar impact first; one item per entity; deterministic ties."""
+    items = sorted(items, key=lambda i: (-i["impact"], i["kind"], str(i["key"])))
+    out, seen = [], set()
+    for it in items:
+        keys = frozenset(it["entities"] or [it["key"]])
+        if keys & seen:
+            continue
+        seen |= keys
+        out.append(it)
+    return out
+
+
+def _door_pair(da, day: D, eid: str):
+    """(TY, LY-aligned) net sales for a door, in reporting currency."""
+    ly = da.ly_date(day)
+    return da.net_sales_of(eid, day), da.net_sales_of(eid, ly)
+
+
+def _door_driver(da, day: D, eid: str) -> str:
+    """BR-22: the diagnosis, not just the symptom."""
+    move = da.conversion_move(day, entity_id=eid)
+    if not move["available"]:
+        return move["annotation"]
+    cb = da.comp_basket(day, entity_id=eid)
+    if cb["upt_pct"] is None:
+        return move["annotation"]
+    return "%s; basket UPT %s, AST %s" % (move["annotation"],
+                                          fmt.pct(cb["upt_pct"]),
+                                          fmt.pct(cb["ast_pct"]))
+
+
+def _item_from_exception(da, day: D, e, omni_mod, customer_mod, merch_mod,
+                         **scope):
+    kind = e["kind"]
+    if kind in ("conversion", "upt", "two_day_comp"):
+        eid = e["entities"][0]
+        ty, ly = _door_pair(da, day, eid)
+        if ty is None:
+            return None
+        delta = (ty - ly) if ly is not None else 0.0
+        return _item(
+            "door", eid, da.entity(eid)["name"], e["severity"], e["title"],
+            "net sales %s vs LY %s (%s)" % (fmt.money_compact(ty),
+                                            fmt.money_compact(ly),
+                                            fmt.money_signed(delta)),
+            e.get("driver") or _door_driver(da, day, eid), delta,
+            "store/%s/%s.html" % (eid, day.isoformat()), e["rule"], ty, ly,
+            [eid])
+    if kind == "late_poster":
+        eid = e["entities"][0]
+        expected = da.trailing_same_weekday_avg(day, 4, entity_id=eid)
+        return _item(
+            "door", eid, da.entity(eid)["name"], e["severity"], e["title"],
+            "nothing posted; a normal %s is about %s"
+            % (fmt.WEEKDAYS[day.weekday()], fmt.money_compact(expected)),
+            "missing, never zero — the door is out of every total and out of "
+            "comp on both sides (BR-3)", expected or 0.0,
+            "store/%s/%s.html" % (eid, day.isoformat()), e["rule"], None, None,
+            [eid])
+    if kind == "category":
+        cat = e["subject"][1]
+        c = merch_mod.category_day(da, day, **scope)
+        row = next((r for r in c.get("categories", [])
+                    if r["category"] == cat), None)
+        if row is None:
+            return None
+        delta = row["comp_ty"] - row["comp_ly"]
+        skus = merch_mod.sku_movers(da, day, n=3, category=cat, **scope)
+        worst = skus["bottom"] if e["severity"] == "adverse" else skus["top"]
+        return _item(
+            "category", cat, cat, e["severity"], e["title"],
+            "comp %s on %s against %s LY (%s)"
+            % (fmt.pct(row["comp_pct"]), fmt.money_compact(row["comp_ty"]),
+               fmt.money_compact(row["comp_ly"]), fmt.money_signed(delta)),
+            "; ".join("%s %s" % (x["name"], fmt.money_signed(x["delta"]))
+                      for x in worst[:3]) or "no SKU detail",
+            delta, "category/%s/%s.html" % (_slug(cat), day.isoformat()),
+            e["rule"], row["comp_ty"], row["comp_ly"], [])
+    if kind == "omni":
+        family = e["subject"][1]
+        good_is_up = e["subject"][2] if len(e["subject"]) > 2 else True
+        if family == "BORIS":
+            f = omni_mod.boris_day(da, day, **scope)
+            ty = f["recognized"]["returned_sales"]
+            ly = f["ly_recognized"]["returned_sales"]
+            r = f["recognized"]
+            driver = ("%s returns on %s items; %s saved back into store sales "
+                      "(%s save rate) and %s of shipping labels avoided"
+                      % (fmt.count(r["orders"]), fmt.count(r["items"]),
+                         fmt.money_compact(r["saved_sales"]),
+                         fmt.pct_plain(r["save_rate"]),
+                         fmt.money_compact(r["label_savings"])))
+            move = ("%s of merchandise returned vs LY %s (%s)"
+                    % (fmt.money_compact(ty), fmt.money_compact(ly),
+                       fmt.money_signed(ty - ly)))
+            impact = -(ty - ly)          # fewer returns is a gain
+            return _item("omni", family,
+                         omni_mod.FAMILY_LABEL.get(family, family),
+                         e["severity"], e["title"], move, driver, impact,
+                         "omni/%s/%s.html" % (family, day.isoformat()),
+                         e["rule"], ty, ly, [])
+        else:
+            f = omni_mod.family_day(da, family, day, **scope)
+            ty = f["recognized"]["sales"]
+            ly = f["ly_recognized"]["sales"]
+            driver = ("%s orders picked up or delivered on the day; %s "
+                      "created, %s of them completing"
+                      % (fmt.count(f["recognized"]["orders"]),
+                         fmt.count(f["all_inclusive"]["orders"]),
+                         fmt.pct_plain(f["completion_rate"])))
+        return _item(
+            "omni", family, omni_mod.FAMILY_LABEL.get(family, family),
+            e["severity"], e["title"],
+            "recognized %s vs LY %s (%s)"
+            % (fmt.money_compact(ty), fmt.money_compact(ly),
+               fmt.money_signed(ty - ly)),
+            driver, ty - ly, "omni/%s/%s.html" % (family, day.isoformat()),
+            e["rule"], ty, ly, [])
+    if kind == "new_to_file":
+        ly = da.ly_date(day)
+        ch = e["subject"][1]
+        merged = dict(scope)
+        merged["channel"] = ch
+        nb = customer_mod.new_customer_block(da, day, **merged)
+        nl = customer_mod.new_customer_block(da, ly, **merged)
+        b_ = customer_mod.buyers(da, day, **merged)
+        return _item(
+            "customer", ch, _channel_label(ch), e["severity"], e["title"],
+            "new-customer sales %s vs LY %s (%s)"
+            % (fmt.money_compact(nb["net_sales"]),
+               fmt.money_compact(nl["net_sales"]),
+               fmt.money_signed(nb["net_sales"] - nl["net_sales"])),
+            "%s new of %s buyers (%s new to file)"
+            % (fmt.count(b_["new_buyers"]), fmt.count(b_["total_buyers"]),
+               fmt.pct_plain(b_["pct_new_to_file"])),
+            nb["net_sales"] - nl["net_sales"],
+            "customer/%s.html" % day.isoformat(), e["rule"],
+            nb["net_sales"], nl["net_sales"], [])
+    return None
+
+
+def _band_movers(da, day: D, direction: str, **scope) -> List[dict]:
+    """Doors clearing the ±5% favourable/unfavourable band on comp — the same
+    band the ops tables key, so a headline and a triangle never disagree."""
+    from flash.catalog import THRESHOLDS
+    band = THRESHOLDS["fav_unfav_band"]
+    out = []
+    for c in da.contribution_to_comp_gap(day, **scope):
+        if c["channel"] != "STORE" or c["pct"] is None:
+            continue
+        if direction == "adverse" and c["pct"] > -band:
+            continue
+        if direction == "favourable" and c["pct"] < band:
+            continue
+        out.append(_item(
+            "door", c["entity_id"], c["name"], direction,
+            "%s comp %s" % (c["name"], fmt.pct(c["pct"])),
+            "net sales %s vs LY %s (%s)"
+            % (fmt.money_compact(c["ty"]), fmt.money_compact(c["ly"]),
+               fmt.money_signed(c["delta"])),
+            _door_driver(da, day, c["entity_id"]), c["delta"],
+            "store/%s/%s.html" % (c["entity_id"], day.isoformat()),
+            "BR-6", c["ty"], c["ly"], [c["entity_id"]]))
+    return out
+
+
+def _plan_movers(da, day: D, direction: str, **scope) -> List[dict]:
+    """Doors beating or missing their DAY-grain plan by more than the same
+    band. Week-planned and no-plan doors are not scored here, because they have
+    no day plan to beat and inventing one is what BR-19 forbids."""
+    from flash.catalog import THRESHOLDS
+    band = THRESHOLDS["fav_unfav_band"]
+    out = []
+    for e in da._scope_entities(**scope):
+        eid = e["entity_id"]
+        if e["channel"] != "STORE" or da.plan_grain_of(eid) != "DAY":
+            continue
+        pair = da.plan_pair(day, entity_id=eid)
+        if not pair["plan"] or not pair["actual"]:
+            continue
+        att = pair["actual"] / pair["plan"]
+        gap = pair["actual"] - pair["plan"]
+        if direction == "adverse" and att > 1.0 - band:
+            continue
+        if direction == "favourable" and att < 1.0 + band:
+            continue
+        out.append(_item(
+            "door", eid, e["name"], direction,
+            "%s %s plan at %s" % (e["name"],
+                                  "missed" if gap < 0 else "beat",
+                                  fmt.pct_plain(att)),
+            "actual %s against a day plan of %s (%s)"
+            % (fmt.money_compact(pair["actual"]),
+               fmt.money_compact(pair["plan"]), fmt.money_signed(gap)),
+            _door_driver(da, day, eid), gap,
+            "store/%s/%s.html" % (eid, day.isoformat()), "BR-19",
+            pair["actual"], pair["plan"], [eid]))
+    return out
 
 
 def _channel_label(key: str) -> str:

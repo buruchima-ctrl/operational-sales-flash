@@ -31,7 +31,7 @@ python3 run_flash.py --companion # rebuild the summary companion only
 Or check the whole thing in one command:
 
 ```bash
-python3 run_flash.py --check # seed + storyline assertions + 226 tests + determinism
+python3 run_flash.py --check # seed + storyline assertions + 249 tests + determinism
 ```
 
 The demo clock is fixed: **today is 2026-07-24** and the latest complete day is
@@ -112,11 +112,75 @@ re-derive several of them a second way.
 - **One formula, one home.** AST and AUS are the field's names for AOV and AUR
   and are emitted from the same computation. The site, the digest and the CSV
   extract read one object, so they cannot disagree.
+- **A conversion move carries its drivers** (BR-22). Traffic and transactions
+  travel with every basis-point figure, so a symptom is never mistaken for a
+  diagnosis.
+- **A page never claims a property it does not have.** The complete site's
+  digest says its links are relative, because they are. The companion's says
+  which of its links leave, because some do. The tests pair each claim with a
+  predicate that reads the file.
 - **A sent flash is immutable.** A correction is a new version with a reason
   string; version 1 survives byte for byte at its own URL.
 - **Regeneration is byte-identical.** No wall clock, no random module — every
   variation is a stable hash of (entity, date, tag). Two builds produce the same
   database and the same `render/` tree, bit for bit.
+
+### Every persona opens on what it can act on
+
+Each of the five persona landings — and the day flash, and the morning digest —
+opens with two blocks: **Needs attention** and **Worth celebrating**, at most
+three items each. An item names the entity, states the move, gives its driver,
+and links to the page behind it.
+
+The blocks are *scoped*, not filtered. Filtering a fleet list gave a Canada
+page a headline reading "Makeup comps −6.2%" over a move reading +16.9%,
+because the title came from the fleet and the figure came from Canada. Building
+the exceptions in the persona's own scope makes that impossible — the title and
+the figure are the same computation (BR-18).
+
+**Ranking rule**, one for every item type and stated on the page:
+
+> Items are ranked by the **absolute dollar impact** of the move they name,
+> measured against the day-aligned LY, in the reporting currency, restricted to
+> that view's own scope.
+
+One rule for doors, categories, omni families and customer signals, so a Region
+page and the Corporate page order the same pair the same way and neither has to
+explain itself. A door that has not posted is scored on the money its own
+trailing four same-weekday averages say is unaccounted for — the honest size of
+"we do not know", rather than zero. A returns family inverts the sign, because
+less merchandise coming back is a gain.
+
+**A celebration is a threshold-clearing favourable move, never editorial.** It
+comes from the same machinery, the same thresholds and the same catalog calls
+as an exception; the only difference is the sign. Sources: favourable omni and
+UPT exceptions, doors clearing the +5% band on comp, and doors beating a
+day-grain plan by more than that band. An entity never appears in both blocks
+on the same view, and the blocks are always both shown — a block that
+disappears when it is empty teaches a reader to stop looking for it.
+
+### A conversion move never travels without its drivers
+
+**BR-22.** "Conversion −264 bp" cannot tell a district manager whether fewer
+people came in or the same people bought less often — a demand problem and an
+execution problem with the same symptom. So wherever a conversion movement is
+stated outside a full KPI tile grid, it carries the drivers that produced it:
+
+```
+conversion −245 bp (traffic +9.9%, txns −5.7%)
+```
+
+Exception lines, coaching narratives, headline items, persona and omni panels,
+window tables, slice tables, rank tables and the digest all carry it. Inside a
+KPI tile grid the annotation is omitted, because traffic and transactions are
+already their own tiles beside conversion.
+
+It is emitted by one catalog function from one comparable set — the doors that
+posted both sales and traffic on the day *and* on its aligned LY counterpart —
+so the arithmetic is checkable: `(1 + txns%) ÷ (1 + traffic%)` equals the
+conversion ratio, and the check is returned rather than assumed. Where traffic
+is missing the annotation says *unavailable — no traffic posted*, naming the
+door, rather than quietly dropping the comparison (BR-15).
 
 ### Exception thresholds
 
@@ -130,7 +194,7 @@ an assertion cannot disagree about what "beyond threshold" means.
 | New-to-file share | 5 pts below baseline, WTD | the channel's own trailing 4-week WTD |
 | Conversion | 150 bp below baseline, WTD | the door's own trailing 4-week WTD |
 | **UPT** | **±5%, WTD** | **the door's own trailing 4-week WTD** |
-| Favourable / unfavourable key | ±5% | the ±5% triangle on every ops table |
+| Favourable / unfavourable key | ±5% | the ±5% triangle on every ops table, and the band a headline celebration or attention item must clear |
 
 UPT takes a percentage rather than a basis-point threshold because it is a
 ratio of counts, not a percentage of visits — basis points would be a category
@@ -241,7 +305,7 @@ targets takes about ten. Every artefact is byte-identical on a rebuild.
 python3 seed.py                                ~3s    49 assertions
 python3 run_flash.py --all                    ~10s    2,660 files, 35 MB
 python3 run_flash.py --companion               ~1s      601 files, 12 MB
-python3 -m unittest discover -s tests -t .    ~13s    226 tests
+python3 -m unittest discover -s tests -t .     ~13s    249 tests
 ```
 
 ---

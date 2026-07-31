@@ -347,11 +347,28 @@ class PersonaCase(unittest.TestCase):
             s = next(r for r in self.obj["slices"]["brand"] if r["key"] == b)
             self.assertAlmostEqual(p, s["net_sales"], places=2, msg=b)
 
-    def test_persona_exceptions_are_a_subset_of_the_fleet_list(self):
-        fleet = set(e["title"] for e in self.obj["exceptions"])
+    def test_persona_exceptions_are_computed_in_the_personas_own_scope(self):
+        """Not filtered from the fleet list — computed in the scope.
+
+        Filtering gave a Canada page a headline reading 'Makeup comps −6.2%'
+        over a move reading +16.9%, because the title came from the fleet and
+        the figure came from Canada. Scoping makes the title and the figure the
+        same computation, and it also lets a persona see a move that is an
+        exception in its own scope but not fleet-wide — which is the whole
+        point of having a persona view."""
+        from flash import compute as _c, customer as _cu, merch as _m, omni as _o
+        from flash.focus import build_exceptions
         for key, p in self.obj["personas"].items():
+            want = build_exceptions(self.da, ANCHOR, _o, _cu, _m, **p["scope"])
+            self.assertEqual([e["title"] for e in p["exceptions"]],
+                             [e["title"] for e in want], key)
+
+    def test_persona_exceptions_only_name_doors_the_persona_owns(self):
+        for key, p in self.obj["personas"].items():
+            ids = set(self.da.scope_ids(**p["scope"]))
             for e in p["exceptions"]:
-                self.assertIn(e["title"], fleet, key)
+                for eid in e["entities"]:
+                    self.assertIn(eid, ids, "%s names %s" % (key, eid))
 
 
 class ExtractCase(unittest.TestCase):

@@ -320,7 +320,41 @@ def _kpi_row(d: Dict[str, object], obj) -> str:
               "", "%s trading · %s comp of trading"
               % (d["pct_trading"], d["pct_comp_of_trading"])),
     ]
-    return '<div class="tiles">%s</div>' % "".join(tiles)
+    return '<div class="tiles">%s</div><!--/tiles-->' % "".join(tiles)
+
+
+def _headline_blocks(depth: int, h, linked: bool = True) -> str:
+    """The two blocks every persona opens with.
+
+    Attention first, and always both — a day with nothing to celebrate says so
+    rather than dropping the block, because a block that disappears when it is
+    empty teaches a reader to stop looking for it."""
+    o = ['<div class="heads">']
+    for key, cls, title in (("attention", "att", "Needs attention"),
+                            ("celebration", "cel", "Worth celebrating")):
+        o.append('<section><h2 class="%s">%s</h2><ol class="head %s">'
+                 % (cls, esc(title), cls))
+        items = h[key]
+        if not items:
+            o.append('<li class="empty">Nothing cleared a threshold in this '
+                     'view today.</li>')
+        for i, it in enumerate(items, 1):
+            label = esc(it["headline"])
+            if it["href"] and linked:
+                label = '<a href="%s">%s</a>' % (esc(_href(depth, it["href"])),
+                                                 label)
+            o.append('<li><span class="imp">%s</span>'
+                     '<span class="n">%d</span>'
+                     '<div class="h">%s</div>'
+                     '<div class="m">%s</div>'
+                     '<div class="why"><b>why</b> %s</div></li>'
+                     % (esc(fmt.money_compact(it["impact"])), i, label,
+                        esc(it["move"]), esc(it["driver"] or "—")))
+        o.append('</ol></section>')
+    o.append('</div>')
+    o.append('<p class="headrule">%s %s</p>'
+             % (esc(h["ranking_rule"]), esc(h["celebration_rule"])))
+    return "".join(o)
 
 
 def _exception_list(depth: int, d, limit: Optional[int] = None,
@@ -589,6 +623,9 @@ def render_day(obj, nav: Optional[Dict[str, object]] = None) -> str:
     a(_day_banners(obj, d, nav, depth))
     a('<p class="narr">%s</p>' % esc(obj["narrative"]))
 
+    a(_headline_blocks(depth, obj["headlines"],
+                       linked=obj.get("deep_links", False)))
+
     a("<h2>Exceptions — the day's calls to action</h2>")
     a(_exception_list(depth, d, linked=obj.get("deep_links", False)))
 
@@ -755,8 +792,9 @@ def _day_windows(d) -> str:
     for k in ("LW", "WTD", "MTD", "QTD", "YTD"):
         w = d["windows"][k]
         rows.append((w["label"], w["range"], w["net_sales"], w["comp_pct"],
-                     w["plan_attainment"], w["conversion"], w["conversion_bps"],
-                     w["upt"], w["upt_vs_ly"], w["pct_new_to_file"]))
+                     w["plan_attainment"], w["conversion"],
+                     w["conversion_move"], w["upt"], w["upt_vs_ly"],
+                     w["pct_new_to_file"]))
     return _table(["Window", "Range", "Net sales", "Comp", "Plan", "Conversion",
                    "vs LY", "UPT", "vs LY", "New-to-file"], rows,
                   titles=[None, None, "Σ net sales over the window's days",
@@ -786,11 +824,11 @@ def _day_slices(obj, d, depth) -> str:
             first = _link(depth, href, r["label"]) if href else r["label"]
             rows.append((first, r["coverage"], r["net_sales"], r["comp_pct"],
                          r["plan_attainment"], r["plan_grain_mix"],
-                         r["conversion"], r["conversion_bps"],
+                         r["conversion"], r["conversion_move"],
                          r["upt"], r["upt_vs_ly"]))
         o.append("<h3>%s</h3>" % esc(heading))
         o.append(_table([heading, "Posted", "Net sales", "Comp", "Plan",
-                         "Plan grain", "Conversion", "vs LY", "UPT",
+                         "Plan grain", "Conversion", "vs LY + drivers", "UPT",
                          "vs LY"], rows))
     o.append(_recon("Brand + e-commerce, affiliate, region and district each "
                     "sum to the same %s headline (BR-11)." % d["net_sales"]))
@@ -817,7 +855,7 @@ def _day_omni(obj, d, depth) -> str:
     o.append('<p class="key">Recognized and all-inclusive are different series '
              'over different populations. They are never added and never charted '
              'as one (BR-10).</p>')
-    o.append('<div class="tiles">%s%s%s</div>' % (
+    o.append('<div class="tiles">%s%s%s</div><!--/tiles-->' % (
         _tile("OMNI penetration", d["omni"]["penetration"], "calc",
               d["omni"]["penetration_bps"] + " vs LY", small=True),
         _tile("Omni-attributed sales", d["omni"]["attributed"], "",
@@ -830,7 +868,7 @@ def _day_omni(obj, d, depth) -> str:
 
 def _day_customer(obj, d, depth) -> str:
     c = d["customer"]
-    tiles = '<div class="tiles">%s%s%s%s%s</div>' % (
+    tiles = '<div class="tiles">%s%s%s%s%s</div><!--/tiles-->' % (
         _tile("Total buyers", c["total_buyers"], "", "one transaction, one buyer",
               small=True),
         _tile("New to file", c["new_buyers"], "",
@@ -1007,7 +1045,7 @@ def _persona_kpi_row(p) -> str:
         _tile("Portfolio / trading", "%s / %s" % (d["portfolio"], d["trading"]),
               "", "%s comp of trading" % d["pct_comp_of_trading"]),
     ]
-    return '<div class="tiles">%s</div>' % "".join(tiles)
+    return '<div class="tiles">%s</div><!--/tiles-->' % "".join(tiles)
 
 
 ROLLUP_HEADINGS = {"brand": "Brand", "region": "Region", "affiliate": "Affiliate",
@@ -1041,12 +1079,12 @@ def _rollup_table(p_key: str, dim: str, rows, date_iso: str, depth: int) -> str:
             fmt.pct_plain(r["plan_attainment"]),
             "/".join(r["plan_grain_mix"]) or "no plan",
             fmt.pct_plain(r["conversion"], 2),
-            _bps_str(r["conversion_bps_vs_ly"]),
+            r["conversion_move"],
             fmt.ratio(r["upt"]),
             fmt.pct(r["upt_pct_vs_ly"]),
         ))
     out.append(_table([ROLLUP_HEADINGS[dim], "Posted", "Net sales", "% to LY",
-                       "% to plan", "Plan grain", "Conversion", "vs LY",
+                       "% to plan", "Plan grain", "Conversion", "vs LY + drivers",
                        "UPT", "vs LY"], table_rows))
     return "".join(out)
 
@@ -1079,6 +1117,7 @@ def render_persona(obj, persona_key: str, nav: Dict[str, object]) -> str:
     if p["currency_note"]:
         a(_band("gold", "Currency", esc(p["currency_note"])))
     a(_persona_kpi_row(p))
+    a(_headline_blocks(depth, p["headlines"], linked=True))
 
     if p["kind"] == "corporate":
         a(_corp_visuals(obj, depth))
@@ -1150,14 +1189,14 @@ def _corp_visuals(obj, depth: int) -> str:
         w = d["windows"][k]
         rows.append((w["label"], w["range"], w["net_sales"], w["comp_pct"],
                      w["plan_attainment"], w["transactions"], w["conversion"],
-                     w["conversion_bps"], w["pct_new_to_file"]))
-    today = obj["headline"]
+                     w["conversion_move"], w["pct_new_to_file"]))
     rows.insert(0, ("Today", d["date_short"], d["net_sales"], d["comp_pct"],
                     d["plan_attainment"], d["transactions"], d["conversion"],
-                    d["conversion_bps"], fmt.pct_plain(
+                    d["conversion_move"], fmt.pct_plain(
                         obj["customer"]["day"]["ty"]["pct_new_to_file"])))
     o.append(_table(["Timeframe", "Range", "Net sales", "Comp", "Plan",
-                     "Transactions", "Conversion", "vs LY", "New-to-file"], rows))
+                     "Transactions", "Conversion", "vs LY + drivers",
+                     "New-to-file"], rows))
 
     channel = [(s["label"], s["net_sales"]) for s in obj["slices"]["channel"]]
     brands = [(s["label"], s["net_sales"]) for s in obj["slices"]["brand"]]
@@ -1249,7 +1288,7 @@ def render_district(obj, district_id: str, nav) -> str:
                     esc(d["week_label"])))]
     for ccy in row.get("currencies", []):
         o.append(_currency_band(obj, ccy, what="Every door in %s" % row["label"]))
-    o.append('<div class="tiles">%s%s%s%s%s</div>' % (
+    o.append('<div class="tiles">%s%s%s%s%s</div><!--/tiles-->' % (
         _tile("Net sales", fmt.money_compact(row["net_sales"]), "",
               fmt.money_exact(row["net_sales"])),
         _tile("Comp", fmt.pct(row["comp_pct"]), _num_class(row["comp_pct"]),
@@ -1273,10 +1312,10 @@ def render_district(obj, district_id: str, nav) -> str:
                      fmt.pct_plain(s["plan_attainment"]),
                      "/".join(s["plan_grain_mix"]) or "no plan",
                      fmt.pct_plain(s["conversion"], 2),
-                     _bps_str(s["conversion_bps_vs_ly"]),
+                     s["conversion_move"],
                      fmt.ratio(s["upt"]), fmt.pct(s["upt_pct_vs_ly"])))
     o.append(_table(["Door", "Posted", "Net sales", "% to LY", "% to plan",
-                     "Plan grain", "Conversion", "vs LY", "UPT", "vs LY"], rows))
+                     "Plan grain", "Conversion", "vs LY + drivers", "UPT", "vs LY"], rows))
     o.append(_recon("Doors sum to %s, this district's total (BR-11)."
                     % fmt.money_exact(row["net_sales"])))
     o.append(_legend())
@@ -1311,7 +1350,7 @@ def render_store(obj, entity_id: str, nav) -> str:
 
     h = b["headline"]
     hd = _store_display(b)
-    o.append('<div class="tiles">%s</div>' % "".join([
+    o.append('<div class="tiles">%s</div><!--/tiles-->' % "".join([
         _tile("Net sales", hd["net_sales"], "", hd["net_sales_local"]),
         _tile("Comp", hd["comp_pct"], _num_class(h["comp_pct"]),
               "contribution %s" % hd["contribution"]),
@@ -1361,10 +1400,10 @@ def render_store(obj, entity_id: str, nav) -> str:
                       fmt.money_compact(w["net_sales"]), fmt.pct(w["comp_pct"]),
                       fmt.pct_plain(w["plan_attainment"]),
                       fmt.pct_plain(w["conversion"], 2),
-                      _bps_str(w["conversion_bps_vs_ly"]),
+                      w["conversion_move"],
                       fmt.ratio(w["upt"]), fmt.pct(w["upt_pct_vs_ly"])))
     o.append(_table(["Window", "Range", "Net sales", "Comp", "Plan",
-                     "Conversion", "vs LY", "UPT", "vs LY"], wrows))
+                     "Conversion", "vs LY + drivers", "UPT", "vs LY"], wrows))
 
     o.append("<h2>Merchandise at this door</h2>")
     o.append(_store_categories(obj, b, depth))
@@ -1474,7 +1513,7 @@ def _store_customer(b) -> str:
     c = b["customer"]
     ty = c["day"]["ty"]
     nb = c["new_block"]
-    return '<div class="tiles">%s%s%s%s</div>' % (
+    return '<div class="tiles">%s%s%s%s</div><!--/tiles-->' % (
         _tile("Buyers", fmt.count(ty["total_buyers"]), "",
               "one transaction, one buyer", small=True),
         _tile("New to file", fmt.count(ty["new_buyers"]), "",
@@ -1831,7 +1870,7 @@ def render_category(obj, category: str, nav) -> str:
                  "%s — %s" % (category, d["date_long"]),
                  "Derived from sales lines; brand and category are never stored "
                  "on a fact row")]
-    o.append('<div class="tiles">%s%s%s%s%s</div>' % (
+    o.append('<div class="tiles">%s%s%s%s%s</div><!--/tiles-->' % (
         _tile("Net sales", fmt.money_compact(row["net_sales"]), "",
               fmt.money_exact(row["net_sales"])),
         _tile("Comp", fmt.pct(row["comp_pct"]), _num_class(row["comp_pct"]),
@@ -1893,7 +1932,7 @@ def render_sku(sku, series, nav) -> str:
                        "like-for-like LY history for part of this window. Where "
                        "the LY figure is absent the comparison is shown as "
                        "unavailable, never as growth from zero."))
-    o.append('<div class="tiles">%s%s%s%s</div>' % (
+    o.append('<div class="tiles">%s%s%s%s</div><!--/tiles-->' % (
         _tile("Window net sales", fmt.money_compact(sku["total_ty"]), "",
               "%d days" % len(series)),
         _tile("Window LY", fmt.money_compact(sku["total_ly"]), "",
@@ -1936,7 +1975,7 @@ def render_omni(obj, family: str, nav) -> str:
 
     if family == "BORIS":
         r, ly = f["recognized"], f["ly_recognized"]
-        o.append('<div class="tiles">%s%s%s%s%s</div>' % (
+        o.append('<div class="tiles">%s%s%s%s%s</div><!--/tiles-->' % (
             _tile("Returns", fmt.count(r["orders"]), "",
                   "%s of merchandise" % fmt.money_compact(r["returned_sales"])),
             _tile("vs LY", fmt.pct(f["pct_vs_ly"]),
@@ -1962,7 +2001,7 @@ def render_omni(obj, family: str, nav) -> str:
                          "Returned", "Saved"], rows))
     else:
         rec, ai = f["recognized"], f["all_inclusive"]
-        o.append('<div class="tiles">%s%s%s%s%s%s</div>' % (
+        o.append('<div class="tiles">%s%s%s%s%s%s</div><!--/tiles-->' % (
             _tile("Recognized orders", fmt.count(rec["orders"]), "",
                   f["recognized_basis"]),
             _tile("Recognized sales", fmt.money_compact(rec["sales"]), "",
@@ -2049,7 +2088,7 @@ def render_customer(obj, nav) -> str:
          _header("Customer panel", "Customer file — %s" % d["date_long"],
                  "New-to-file derives only from each customer's first purchase "
                  "date (BR-12)")]
-    o.append('<div class="tiles">%s%s%s%s%s%s</div>' % (
+    o.append('<div class="tiles">%s%s%s%s%s%s</div><!--/tiles-->' % (
         _tile("Total buyers", d["customer"]["total_buyers"], "",
               "one transaction, one buyer"),
         _tile("New to file", d["customer"]["new_buyers"], "",

@@ -780,6 +780,218 @@ class PageClaimsCase(unittest.TestCase):
         self.assertNotIn('href="http', txt)
 
 
+TILES_RE = re.compile(r'<div class="tiles">.*?<!--/tiles-->', re.S)
+BP_RE = re.compile(r"[\u2212+-]?\d+ bp")
+# The two metrics that legitimately state basis points without being a
+# conversion movement. Named explicitly so the rule cannot be widened by
+# accident.
+NON_CONVERSION_BP = ("omni penetration", "new-to-file", "new to file",
+                     "penetration")
+
+
+class ConversionDriverCase(unittest.TestCase):
+    """BR-22: a conversion movement never travels without its drivers.
+
+    'Conversion −264 bp' cannot tell a district manager whether fewer people
+    came in or the same people bought less often — a demand problem and an
+    execution problem with the same symptom. So every statement of the move
+    carries `(traffic ±x%, txns ±y%)`, except inside a full KPI tile grid where
+    traffic and transactions are already their own tiles."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.site = dbfixture.site_dir()
+        cls.comp = dbfixture.companion_dir()
+        cls.obj = dbfixture.site_objects()[-1]
+        cls.da = dbfixture.da()
+
+    def _offenders(self, root):
+        bad = []
+        for r, _d, fs in os.walk(root):
+            for f in sorted(fs):
+                if not f.endswith(".html"):
+                    continue
+                raw = _read(os.path.join(r, f))
+                # A tile grid states traffic, transactions and conversion as
+                # peers, so the drivers are present as data.
+                stripped = TILES_RE.sub(" ", JSON_RE.sub(" ", raw))
+                text = TAG_RE.sub(" ", stripped)
+                for m in BP_RE.finditer(text):
+                    before = text[max(0, m.start() - 70):m.start()].lower()
+                    after = text[m.end():m.end() + 16]
+                    if any(k in before for k in NON_CONVERSION_BP):
+                        continue
+                    if "(traffic" in after.replace(" (", "("):
+                        continue
+                    bad.append((os.path.relpath(os.path.join(r, f), root),
+                                text[max(0, m.start() - 60):m.end() + 20]))
+        return bad
+
+    def test_the_complete_site_never_states_a_bare_conversion_move(self):
+        bad = self._offenders(self.site)
+        self.assertEqual(bad[:4], [], "%d bare conversion moves" % len(bad))
+
+    def test_the_companion_never_states_a_bare_conversion_move(self):
+        bad = self._offenders(self.comp)
+        self.assertEqual(bad[:4], [], "%d bare conversion moves" % len(bad))
+
+    def test_the_annotation_is_actually_present_and_not_vacuous(self):
+        """Guard against the rule passing because nothing states a move."""
+        found = 0
+        for r, _d, fs in os.walk(self.site):
+            for f in fs:
+                if f.endswith(".html"):
+                    found += _read(os.path.join(r, f)).count("(traffic ")
+        self.assertGreater(found, 500)
+
+    def test_the_annotation_arithmetic_is_internally_consistent(self):
+        """(1 + txns%) ÷ (1 + traffic%) must be the conversion ratio."""
+        for scope in ({}, {"region": "Midwest"}, {"entity_id": "LB-015"},
+                      {"affiliate_id": "CA"}, {"brand_id": "LUM"}):
+            m = self.da.conversion_move(dbfixture.ANCHOR, **scope)
+            if not m["available"]:
+                continue
+            self.assertAlmostEqual(m["identity_gap"], 0.0, places=9, msg=str(scope))
+            ratio = m["ty_conversion"] / m["ly_conversion"]
+            self.assertAlmostEqual((1 + m["txns_pct"]) / (1 + m["traffic_pct"]),
+                                   ratio, places=9, msg=str(scope))
+
+    def test_a_door_with_no_traffic_says_so_rather_than_omitting(self):
+        eid, day = sorted(seed.TRAFFIC_MISSING)[0]
+        m = self.da.conversion_move(day, entity_id=eid)
+        self.assertFalse(m["available"])
+        self.assertIn("unavailable", m["annotation"])
+        self.assertNotIn("bp", m["annotation"])
+        self.assertIn("no traffic posted", m["annotation"])
+
+    def test_the_annotation_has_one_home(self):
+        """No renderer reassembles it from parts.
+
+        The discriminator is the annotation's own separator: the catalog is the
+        only module that may write ", txns ". A renderer that started
+        formatting its own driver string would trip this before it shipped."""
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        for name in ("render_site.py", "render_email.py", "compute.py",
+                     "focus.py"):
+            src = _read(os.path.join(root, "flash", name))
+            self.assertNotIn(", txns ", src, name)
+        self.assertIn(", txns ", _read(os.path.join(root, "flash", "catalog.py")))
+
+    def test_the_exception_line_carries_the_driver(self):
+        exc = [e for e in self.obj["exceptions"] if e["kind"] == "conversion"]
+        self.assertTrue(exc)
+        for e in exc:
+            self.assertIn("(traffic ", e["detail"])
+            self.assertIn("(traffic ", e["driver"] or "")
+
+
+class HeadlineBlockCase(unittest.TestCase):
+    """Needs attention / worth celebrating, on all five personas."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.site = dbfixture.site_dir()
+        cls.comp = dbfixture.companion_dir()
+        cls.obj = dbfixture.site_objects()[-1]
+        cls.date = cls.obj["date"]
+
+    def test_every_persona_landing_opens_with_both_blocks(self):
+        for key in sorted(self.obj["personas"]):
+            kind, pkey = key.split("/", 1)
+            rel = ("%s/%s.html" % (kind, self.date) if kind in
+                   ("corporate", "field")
+                   else "%s/%s/%s.html" % (kind, _slug_for(kind, pkey), self.date))
+            txt = _read(os.path.join(self.site, rel))
+            self.assertIn("Needs attention", txt, rel)
+            self.assertIn("Worth celebrating", txt, rel)
+
+    def test_the_day_flash_and_the_digest_carry_the_corporate_blocks(self):
+        for rel in ("day/%s.html" % self.date, "email/%s.html" % self.date):
+            txt = _read(os.path.join(self.site, rel))
+            self.assertIn("Needs attention", txt, rel)
+            self.assertIn("Worth celebrating", txt, rel)
+            for it in self.obj["headlines"]["attention"]:
+                self.assertIn(it["headline"], txt, "%s: %s" % (rel, it["headline"]))
+
+    def test_the_companion_carries_them_too(self):
+        txt = _read(os.path.join(self.comp, "day/%s.html" % self.date))
+        self.assertIn("Needs attention", txt)
+        self.assertIn("Worth celebrating", txt)
+
+    def test_never_more_than_three_items_and_never_both_blocks(self):
+        blocks = [self.obj["headlines"]]
+        blocks += [p["headlines"] for p in self.obj["personas"].values()]
+        for h in blocks:
+            self.assertLessEqual(len(h["attention"]), 3)
+            self.assertLessEqual(len(h["celebration"]), 3)
+            att = set()
+            for it in h["attention"]:
+                att |= set(it["entities"] or [it["key"]])
+            for it in h["celebration"]:
+                self.assertFalse(att & set(it["entities"] or [it["key"]]))
+
+    def test_items_are_scoped_to_what_the_persona_can_act_on(self):
+        da = dbfixture.da()
+        for key, p in self.obj["personas"].items():
+            ids = set(da.scope_ids(**p["scope"]))
+            for it in p["headlines"]["attention"] + p["headlines"]["celebration"]:
+                if it["kind"] != "door":
+                    continue
+                self.assertIn(it["key"], ids, "%s shows %s" % (key, it["key"]))
+
+    def test_every_item_figure_equals_the_page_it_links_to(self):
+        da = dbfixture.da()
+        checked = 0
+        for h in [self.obj["headlines"]] + [p["headlines"] for p in
+                                            self.obj["personas"].values()]:
+            for it in h["attention"] + h["celebration"]:
+                if it["kind"] != "door" or it["ty"] is None or it["rule"] == "BR-19":
+                    continue
+                checked += 1
+                self.assertAlmostEqual(
+                    it["ty"], da.net_sales_of(it["key"], dbfixture.ANCHOR), places=2)
+                page = _read(os.path.join(self.site, "store", it["key"],
+                                          "%s.html" % self.date))
+                from flash import fmt
+                self.assertIn(fmt.money_compact(it["ty"]), page)
+        self.assertGreater(checked, 5)
+
+    def test_items_are_ranked_by_absolute_dollar_impact(self):
+        for h in [self.obj["headlines"]] + [p["headlines"] for p in
+                                            self.obj["personas"].values()]:
+            for block in ("attention", "celebration"):
+                vals = [i["impact"] for i in h[block]]
+                self.assertEqual(vals, sorted(vals, reverse=True))
+
+    def test_the_ranking_rule_is_stated_on_the_page(self):
+        txt = _read(os.path.join(self.site, "corporate/%s.html" % self.date))
+        self.assertIn("absolute dollar impact", txt)
+        self.assertIn("threshold-clearing favourable move", txt)
+
+    def test_every_item_carries_a_driver(self):
+        for h in [self.obj["headlines"]] + [p["headlines"] for p in
+                                            self.obj["personas"].values()]:
+            for it in h["attention"] + h["celebration"]:
+                self.assertTrue(it["driver"], it["headline"])
+
+    def test_door_items_carry_the_conversion_driver_annotation(self):
+        seen = 0
+        for h in [self.obj["headlines"]] + [p["headlines"] for p in
+                                            self.obj["personas"].values()]:
+            for it in h["attention"] + h["celebration"]:
+                if it["kind"] != "door" or it["rule"] == "BR-3":
+                    continue
+                seen += 1
+                self.assertTrue("(traffic " in it["driver"]
+                                or "unavailable" in it["driver"], it["driver"])
+        self.assertGreater(seen, 5)
+
+
+def _slug_for(kind, key):
+    from flash.focus import _slug
+    return _slug(key) if kind == "region" else key
+
+
 class PersonaPageCase(unittest.TestCase):
     """BR-18 on the surface: the same figure, wherever it appears."""
 

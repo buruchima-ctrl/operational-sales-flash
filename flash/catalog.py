@@ -30,6 +30,7 @@ from __future__ import annotations
 import datetime as dt
 from typing import Dict, List, Optional
 
+from flash import fmt
 from flash.calendar import NRFCalendar, PERIODS_PER_YEAR
 
 D = dt.date
@@ -72,6 +73,13 @@ THRESHOLDS = {
 
 class CatalogError(ValueError):
     pass
+
+
+def _bp(v) -> str:
+    """Basis points, signed, with the true minus sign."""
+    if v is None:
+        return fmt.NA
+    return "%s%d bp" % ("+" if v >= 0 else fmt.MINUS, abs(int(round(v))))
 
 
 def reconcile_display(rows, key, total):
@@ -565,6 +573,7 @@ class DataAccess(object):
                 "channel": e["channel"], "brand_id": e["brand_id"],
                 "district_id": e["district_id"], "affiliate_id": e["affiliate_id"],
                 "ty": ty, "ly": lyv, "delta": ty - lyv,
+                "pct": (ty / lyv - 1.0) if lyv else None,
                 "contribution": ((ty - lyv) / ly_total) if ly_total else 0.0,
             })
         out.sort(key=lambda c: (c["contribution"], c["entity_id"]))
@@ -968,13 +977,25 @@ class DataAccess(object):
                 ly_x += ly_row["transactions"]
         ty_conv = (ty_x / ty_t) if ty_t else None
         ly_conv = (ly_x / ly_t) if ly_t else None
+        # The MOVEMENT is measured on the comparable set only — doors with
+        # traffic on both sides. Comparing a TY rate that includes a door with
+        # no LY counterpart against an LY rate that excludes it is the same
+        # defect BR-1 exists to stop, one dimension over.
+        cty_x = cty_t = 0
+        for eid in comparable:
+            cty_t += self.traffic_of(eid, day)
+            cty_x += self.sales_row(eid, day)["transactions"]
+        cmp_conv = (cty_x / cty_t) if cty_t else None
         return {
             "conversion": ty_conv,
             "available": ty_conv is not None,
             "transactions": ty_x, "traffic": ty_t,
             "ly_conversion": ly_conv,
-            "bps_vs_ly": (round((ty_conv - ly_conv) * 10000.0, 1)
-                          if (ty_conv is not None and ly_conv is not None) else None),
+            "comparable_conversion": cmp_conv,
+            "comparable_transactions": cty_x, "comparable_traffic": cty_t,
+            "ly_transactions": ly_x, "ly_traffic": ly_t,
+            "bps_vs_ly": (round((cmp_conv - ly_conv) * 10000.0, 1)
+                          if (cmp_conv is not None and ly_conv is not None) else None),
             "stores_with_traffic": len(have),
             "stores_missing_traffic": sorted(missing),
             "missing_names": [self.entity(m)["name"] for m in sorted(missing)],
@@ -984,6 +1005,74 @@ class DataAccess(object):
                 "conversion unavailable — no traffic posted (BR-15: missing "
                 "traffic is never shown as 0%)" if ty_conv is None else None),
         }
+
+    def conversion_move(self, day: D, **scope) -> Dict[str, object]:
+        """BR-22: a conversion movement never travels without its drivers.
+
+        "Conversion −264 bp" cannot tell a district manager whether fewer
+        people came in or the same people bought less often. Those are
+        different problems with different fixes, and the difference is one
+        division away — so the difference is stated every time the movement is.
+
+        Everything here comes off the SAME comparable set the KPI tree uses:
+        doors that posted both sales and traffic on the day and on its aligned
+        LY counterpart. That makes the arithmetic checkable —
+        (1 + txns%) ÷ (1 + traffic%) = the conversion ratio — and the check is
+        returned rather than assumed."""
+        c = self.conversion(day, **scope)
+        ly = c["ly_date"]
+        if not c["comparable_traffic"] or not c["ly_traffic"]:
+            missing = c["missing_names"]
+            reason = ("no traffic posted%s"
+                      % (" for %s" % ", ".join(missing) if missing else ""))
+            return {
+                "available": False, "bps": None, "ly_date": ly,
+                "traffic_pct": None, "txns_pct": None,
+                "ty_conversion": c["conversion"], "ly_conversion": None,
+                "missing_traffic": c["stores_missing_traffic"],
+                "missing_names": missing,
+                "annotation": "conversion unavailable — %s" % reason,
+                "annotation_bare": "unavailable — %s" % reason,
+                "identity_gap": None,
+            }
+        t_pct = c["comparable_traffic"] / float(c["ly_traffic"]) - 1.0
+        x_pct = c["comparable_transactions"] / float(c["ly_transactions"]) - 1.0
+        ratio = c["comparable_conversion"] / c["ly_conversion"]
+        bare = "%s (traffic %s, txns %s)" % (_bp(c["bps_vs_ly"]), fmt.pct(t_pct),
+                                             fmt.pct(x_pct))
+        return {
+            "available": True, "bps": c["bps_vs_ly"], "ly_date": ly,
+            "traffic_pct": t_pct, "txns_pct": x_pct,
+            "traffic_ty": c["comparable_traffic"], "traffic_ly": c["ly_traffic"],
+            "txns_ty": c["comparable_transactions"], "txns_ly": c["ly_transactions"],
+            "ty_conversion": c["comparable_conversion"],
+            "ly_conversion": c["ly_conversion"],
+            "comparable_doors": c["comparable_stores"],
+            "missing_traffic": c["stores_missing_traffic"],
+            "missing_names": c["missing_names"],
+            "annotation": "conversion " + bare,
+            "annotation_bare": bare,
+            # (1 + txns%) / (1 + traffic%) must equal the conversion ratio
+            "identity_gap": round((1.0 + x_pct) / (1.0 + t_pct) - ratio, 12),
+        }
+
+    def conversion_window_move(self, day: D, window: str,
+                               **scope) -> Dict[str, object]:
+        """The same annotation over a fiscal window — the form a coaching line
+        uses, because one day of conversion is weather."""
+        w = self.conversion_window(day, window, **scope)
+        if not w["traffic"] or not w["ly_traffic"]:
+            return {"available": False, "bps": None,
+                    "annotation": "conversion unavailable — no traffic posted",
+                    "annotation_bare": "unavailable — no traffic posted"}
+        t_pct = w["traffic"] / float(w["ly_traffic"]) - 1.0
+        x_pct = w["transactions"] / float(w["ly_transactions"]) - 1.0
+        bare = "%s (traffic %s, txns %s)" % (_bp(w["bps_vs_ly"]), fmt.pct(t_pct),
+                                             fmt.pct(x_pct))
+        return {"available": True, "bps": w["bps_vs_ly"], "window": window,
+                "traffic_pct": t_pct, "txns_pct": x_pct,
+                "ty_conversion": w["conversion"], "ly_conversion": w["ly_conversion"],
+                "annotation": "conversion " + bare, "annotation_bare": bare}
 
     def conversion_window(self, day: D, window: str, **scope) -> Dict[str, object]:
         """Conversion over a fiscal window, aggregated (Σ transactions ÷ Σ

@@ -168,6 +168,48 @@ nav.personas a.on{
 .bad{color:var(--bad)} .good{color:var(--good)} .calc{color:var(--calc)}
 .gold{color:var(--gold)} .blue{color:var(--blue)} .soft{color:var(--soft)}
 
+/* -- headline blocks: needs attention / worth celebrating --------------- */
+.heads{display:flex;flex-wrap:wrap;gap:var(--sp-4);margin:0 0 var(--sp-5)}
+.heads > section{flex:1 1 400px;min-width:0}
+.heads h2{margin-top:0}
+.heads h2.att::after{background:var(--bad)}
+.heads h2.cel::after{background:var(--calc)}
+ol.head{list-style:none;margin:0;padding:0;counter-reset:hd}
+ol.head li{
+  counter-increment:hd;background:var(--panel);
+  border:1px solid var(--rule-soft);border-left:3px solid var(--rule);
+  padding:var(--sp-3);margin:0 0 var(--sp-2);position:relative;
+}
+ol.head.att li{border-left-color:var(--bad)}
+ol.head.cel li{border-left-color:var(--calc)}
+ol.head li .n{
+  font-family:var(--data);font-size:var(--fs-2xs);color:var(--faint);
+  font-weight:600;
+}
+ol.head li .h{
+  font-family:var(--display);font-size:var(--fs-base);font-weight:600;
+  line-height:1.35;color:var(--ink);margin:2px 0 var(--sp-1);
+}
+ol.head li .h a{border-bottom:1px solid rgba(44,95,138,.28)}
+ol.head li .m{
+  font-family:var(--data);font-size:var(--fs-xs);color:var(--ink-2);
+  font-variant-numeric:tabular-nums;line-height:1.5;
+}
+ol.head li .why{
+  font-family:var(--data);font-size:var(--fs-xs);color:var(--soft);
+  line-height:1.5;padding-top:3px;
+}
+ol.head li .why b{color:var(--calc);font-weight:600}
+ol.head li .imp{
+  position:absolute;top:var(--sp-3);right:var(--sp-3);
+  font-family:var(--data);font-size:var(--fs-xs);color:var(--faint);
+  font-variant-numeric:tabular-nums;
+}
+ol.head li.empty{border-left-color:var(--rule);color:var(--soft);
+  font-family:var(--body);font-size:var(--fs-sm)}
+.headrule{font-family:var(--data);font-size:var(--fs-xs);color:var(--faint);
+  line-height:1.55;margin:0 0 var(--sp-4);max-width:88ch}
+
 /* -- banners ----------------------------------------------------------- */
 .band{
   border:1px solid var(--gold-edge);border-left:3px solid var(--gold);

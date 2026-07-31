@@ -112,6 +112,7 @@ def render(obj) -> str:
     _headline(a, obj, d)
     _banners(a, obj, d)
     _narrative(a, obj)
+    _headlines(a, obj, d)
     _exceptions(a, obj, d)
     _kpis(a, obj, d)
     _plan(a, obj, d)
@@ -243,6 +244,42 @@ def _narrative(a, obj):
     a('</td></tr>')
 
 
+def _headlines(a, obj, d):
+    """The corporate-scoped blocks, ahead of everything else. A digest that
+    makes an operator scroll to find what needs doing has been written for the
+    sender, not the reader."""
+    h = obj["headlines"]
+    for key, title, colour in (("attention", "Needs attention", BAD),
+                               ("celebration", "Worth celebrating", CALC)):
+        _section(a, title)
+        a('<tr><td style="padding:0 22px 10px;">')
+        if not h[key]:
+            a('<div style="font-family:%s;font-size:13px;color:%s;">Nothing '
+              'cleared a threshold today.</div>' % (BODY, INK_SOFT))
+        for i, it in enumerate(h[key], 1):
+            label = esc(it["headline"])
+            if it["href"] and obj.get("deep_links"):
+                label = ('<a href="%s%s" style="color:%s;'
+                         'text-decoration:underline;">%s</a>'
+                         % (UP, esc(it["href"]), BLUE, label))
+            a('<div style="padding:9px 0 9px 10px;border-left:3px solid %s;'
+              'border-bottom:1px solid %s;margin-bottom:6px;">' % (colour, HAIR))
+            a('<div style="font-family:%s;font-size:14px;font-weight:600;'
+              'line-height:1.4;color:%s;">%s</div>' % (DISPLAY, INK, label))
+            a('<div style="font-family:%s;font-size:11.5px;color:%s;'
+              'padding-top:3px;line-height:1.5;">%s</div>'
+              % (DATA, INK_2, esc(it["move"])))
+            a('<div style="font-family:%s;font-size:11px;color:%s;'
+              'padding-top:2px;line-height:1.5;"><span style="color:%s;">why</span> '
+              '%s</div>' % (DATA, INK_SOFT, CALC, esc(it["driver"] or "—")))
+            a('</div>')
+        a('<div style="font-family:%s;font-size:10.5px;color:%s;'
+          'padding-top:2px;line-height:1.5;">%s</div>'
+          % (DATA, FAINT, esc(h["ranking_rule"] if key == "attention"
+                              else h["celebration_rule"])))
+        a('</td></tr>')
+
+
 def _exceptions(a, obj, d):
     _section(a, "Today's exceptions")
     items = d["exceptions"]
@@ -282,7 +319,7 @@ def _kpis(a, obj, d):
         ("AUS — avg unit sale", d["aus"], d["aus_vs_ly"]),
         ("UPT — units per transaction", d["upt"], d["upt_vs_ly"]),
         ("Traffic", d["traffic"], d["traffic_pct"]),
-        ("Conversion", d["conversion"], d["conversion_bps"]),
+        ("Conversion", d["conversion"], d["conversion_move"]),
         ("New customers", d["new_customers"], d["new_customer_pct"] + " of sales"),
         ("Returns", d["returns"], d["returns_vs_ly"]),
         ("Discounts", d["discounts"], d["discounts_pct_of_gross"] + " of gross"),

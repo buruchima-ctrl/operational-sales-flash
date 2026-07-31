@@ -41,7 +41,7 @@ from flash import customer as customer_mod
 from flash import fmt, merch, narrative, omni
 from flash.calendar import ly_holiday_aligned_date
 from flash.catalog import THRESHOLDS, reconcile_display
-from flash.focus import build_exceptions, build_focus, _slug
+from flash.focus import build_exceptions, build_focus, build_headlines, _slug
 
 D = dt.date
 
@@ -127,6 +127,8 @@ def build_flash(da, day: D, as_of: Optional[D] = None, version: int = 1,
     obj["completeness"] = _completeness(da, day)
     obj["focus"] = build_focus(da, day, ly_override=ly_override)
     obj["exceptions"] = build_exceptions(da, day, omni, customer_mod, merch)
+    obj["headlines"] = build_headlines(da, day, omni, customer_mod, merch)
+    obj["conversion_move"] = da.conversion_move(day)
     obj["recap"] = _recap(da, day, dow)
     obj["currency_note"] = da.currency_note()
     obj["fx"] = _fx_block(da)
@@ -255,6 +257,7 @@ def _headline(da, day: D, comp: Dict[str, object], **scope) -> Dict[str, object]
     plan = da.plan_pair(day, **scope)
     txn = da.comp_transactions(day, ly_override=ly_override, **scope)
     conv = da.conversion(day, **scope)
+    cmove = da.conversion_move(day, **scope)
     trf = da.traffic(day, **scope)
     disc = da.discounts(day, **scope)
     rets = da.store_returns(day, **scope)
@@ -289,6 +292,10 @@ def _headline(da, day: D, comp: Dict[str, object], **scope) -> Dict[str, object]
         "conversion_available": conv["available"],
         "conversion_bps_vs_ly": conv["bps_vs_ly"],
         "conversion_note": conv["unavailable_note"],
+        "conversion_move": cmove["annotation_bare"],
+        "conversion_move_full": cmove["annotation"],
+        "conversion_traffic_pct": cmove["traffic_pct"],
+        "conversion_txns_pct": cmove["txns_pct"],
         "new_customers": nb["new_customers"],
         "new_customer_sales": nb["net_sales"],
         "new_customer_pct": nb["pct_of_net_sales"],
@@ -318,6 +325,8 @@ def _window(da, day: D, window: str, **scope) -> Dict[str, object]:
     m["conversion"] = c["conversion"]
     m["ly_conversion"] = c["ly_conversion"]
     m["conversion_bps_vs_ly"] = c["bps_vs_ly"]
+    m["conversion_move"] = da.conversion_window_move(
+        day, window, **scope)["annotation_bare"]
     m["traffic"] = c["traffic"]
     bw = da.basket_window(day, window, **scope)
     m["upt"] = bw["upt"]
@@ -374,6 +383,7 @@ def _slice(da, day: D, ly_override, kw: dict, label: str, key: str,
     open_ids = [e["entity_id"] for e in scope_entities if da.is_open_on(e, day)]
     reported = [e for e in open_ids if da.sales_row(e, day) is not None]
     conv = da.conversion(day, **kw)
+    move = da.conversion_move(day, **kw)
     cb = da.comp_basket(day, ly_override=ly_override, **kw)
     return {
         "key": key, "label": label, "region": region,
@@ -389,6 +399,8 @@ def _slice(da, day: D, ly_override, kw: dict, label: str, key: str,
         "plan_grain_mix": da.plan_status(day, **kw)["grain_mix"],
         "conversion": conv["conversion"],
         "conversion_bps_vs_ly": conv["bps_vs_ly"],
+        "conversion_move": move["annotation_bare"],
+        "conversion_move_full": move["annotation"],
         "traffic": conv["traffic"] or None,
         "upt": cb["upt"], "ly_upt": cb["ly_upt"],
         "upt_pct_vs_ly": cb["upt_pct"], "ast_pct_vs_ly": cb["ast_pct"],
@@ -629,7 +641,11 @@ def _personas(da, day: D, ly_override) -> Dict[str, object]:
             "unavailable_doors": doors["unavailable"],
             "currency_note": da.currency_note(**scope),
             "plan_status": da.plan_status(day, **scope),
-            "exceptions": _scoped_exceptions(da, day, scope),
+            "exceptions": build_exceptions(da, day, omni, customer_mod,
+                                           merch, **scope),
+            "headlines": build_headlines(da, day, omni, customer_mod, merch,
+                                         **scope),
+            "conversion_move": da.conversion_move(day, **scope),
         }
     return out
 
@@ -690,18 +706,6 @@ def _persona_rollup(da, day: D, ly_override, dim: str, scope: dict) -> List[dict
     return rows
 
 
-def _scoped_exceptions(da, day: D, scope: dict) -> List[dict]:
-    """Exceptions filtered to the persona's own doors. The list is built once
-    for the fleet; a persona sees the subset that belongs to it, never a
-    differently-computed one."""
-    ids = set(da.scope_ids(**scope))
-    out = []
-    for e in build_exceptions(da, day, omni, customer_mod, merch):
-        if not e["entities"] or set(e["entities"]) & ids:
-            out.append(e)
-    return out
-
-
 def _display_kpis(h) -> Dict[str, str]:
     """The KPI headline row as display strings, for any scope."""
     return {
@@ -724,6 +728,8 @@ def _display_kpis(h) -> Dict[str, str]:
         "conversion": (fmt.pct_plain(h["conversion"], 2)
                        if h["conversion_available"] else "unavailable"),
         "conversion_bps": _bps(h["conversion_bps_vs_ly"]),
+        "conversion_move": h["conversion_move"],
+        "conversion_move_full": h["conversion_move_full"],
         "new_customers": fmt.count(h["new_customers"]),
         "new_customer_pct": fmt.pct_plain(h["new_customer_pct"]),
         "new_customer_ast": fmt.money_plain(h["new_customer_ast"]),
@@ -785,6 +791,7 @@ def _store_blocks(da, day: D) -> Dict[str, object]:
         block["windows"] = {w: _window(da, day, w, **scope)
                             for w in ("WTD", "MTD", "QTD")}
         block["plan_status"] = da.plan_status(day, **scope)
+        block["conversion_move"] = da.conversion_move(day, **scope)
         block["hourly"] = da.hourly_series(eid, day)
         block["hourly_profile"] = da.hourly_profile(eid, day, weeks=4)
         block["tree"] = da.kpi_tree(eid, day)
@@ -1119,6 +1126,8 @@ def _display(obj) -> Dict[str, object]:
         "conversion": (fmt.pct_plain(h["conversion"], 2)
                        if h["conversion_available"] else "unavailable"),
         "conversion_bps": _bps(h["conversion_bps_vs_ly"]),
+        "conversion_move": h["conversion_move"],
+        "conversion_move_full": h["conversion_move_full"],
         "new_customers": fmt.count(h["new_customers"]),
         "new_customer_sales": fmt.money_compact(h["new_customer_sales"]),
         "new_customer_pct": fmt.pct_plain(h["new_customer_pct"]),
@@ -1170,6 +1179,7 @@ def _display(obj) -> Dict[str, object]:
             "transactions": fmt.count(w["transactions"]),
             "conversion": fmt.pct_plain(w["conversion"], 2),
             "conversion_bps": _bps(w["conversion_bps_vs_ly"]),
+            "conversion_move": w["conversion_move"],
             "upt": fmt.ratio(w["upt"]),
             "upt_vs_ly": fmt.pct(w["upt_pct_vs_ly"]),
             "ast": fmt.money_plain(w["ast"]),
@@ -1258,6 +1268,7 @@ def _display_slice(r) -> Dict[str, object]:
         "plan_grain_mix": "/".join(r["plan_grain_mix"]) or "no plan",
         "conversion": fmt.pct_plain(r["conversion"], 2),
         "conversion_bps": _bps(r["conversion_bps_vs_ly"]),
+        "conversion_move": r["conversion_move"],
         "upt": fmt.ratio(r["upt"]),
         "upt_vs_ly": fmt.pct(r["upt_pct_vs_ly"]),
         "traffic": fmt.count(r["traffic"]),
@@ -1556,6 +1567,67 @@ def _assert_invariants(da, obj, day) -> None:
                 "BR-20 broken on %s for %s: driver contributions sum to %.2f "
                 "against a gap of %.2f. Fix in catalog.kpi_tree()."
                 % (day, eid, s, t["gap"]))
+
+    # -- headline blocks: item 1's three promises, checked ----------------
+    scopes = [("headlines", obj["headlines"])]
+    for key in sorted(obj.get("personas", {})):
+        scopes.append((key, obj["personas"][key]["headlines"]))
+    for name, h in scopes:
+        for block in ("attention", "celebration"):
+            if len(h[block]) > h["max_items"]:
+                raise AssertionError(
+                    "%s on %s lists %d %s items; the ceiling is %d. Three is "
+                    "what a district manager reads before breakfast; a fourth "
+                    "is a list, not a headline."
+                    % (name, day, len(h[block]), block, h["max_items"]))
+        att = set()
+        for it in h["attention"]:
+            att |= set(it["entities"] or [it["key"]])
+        for it in h["celebration"]:
+            overlap = att & set(it["entities"] or [it["key"]])
+            if overlap:
+                raise AssertionError(
+                    "%s on %s puts %s in both 'needs attention' and 'worth "
+                    "celebrating'. One entity, one verdict — a page that says "
+                    "both has said nothing."
+                    % (name, day, sorted(overlap)))
+        for it in h["attention"] + h["celebration"]:
+            if it["kind"] != "door" or it["ty"] is None:
+                continue
+            eid = it["key"]
+            if it["rule"] == "BR-19":
+                continue          # plan items carry actual vs plan, not vs LY
+            actual = da.net_sales_of(eid, day)
+            if actual is None or abs(actual - it["ty"]) > 0.01:
+                raise AssertionError(
+                    "%s on %s: headline item for %s carries TY %r but the door "
+                    "page reads %r. A headline must be the same call as the "
+                    "page it links to (BR-18)."
+                    % (name, day, eid, it["ty"], actual))
+            if it["ly"] is not None:
+                ly_actual = da.net_sales_of(eid, da.ly_date(day))
+                if ly_actual is None or abs(ly_actual - it["ly"]) > 0.01:
+                    raise AssertionError(
+                        "%s on %s: headline item for %s carries LY %r but the "
+                        "aligned day reads %r."
+                        % (name, day, eid, it["ly"], ly_actual))
+
+    # -- BR-22: a conversion movement never travels without its drivers ----
+    cm = obj["conversion_move"]
+    if cm["available"]:
+        if abs(cm["identity_gap"]) > 1e-9:
+            raise AssertionError(
+                "BR-22 broken on %s: (1 + txns%%) / (1 + traffic%%) misses the "
+                "conversion ratio by %r. The annotation's three figures must "
+                "come off one comparable set." % (day, cm["identity_gap"]))
+        if "traffic" not in cm["annotation"] or "txns" not in cm["annotation"]:
+            raise AssertionError(
+                "BR-22 broken on %s: the annotation %r states a movement "
+                "without its drivers." % (day, cm["annotation"]))
+    elif "bp" in cm["annotation"]:
+        raise AssertionError(
+            "BR-22 broken on %s: conversion is unavailable but the annotation "
+            "%r still states a basis-point move." % (day, cm["annotation"]))
 
     # -- narrative discipline ---------------------------------------------
     sentences = [s for s in obj["narrative"].split(". ") if s.strip()]

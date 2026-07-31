@@ -21,9 +21,17 @@ from __future__ import annotations
 import datetime as dt
 from typing import Dict, List, Optional
 
+from flash import fmt
 from flash.catalog import CatalogError, THRESHOLDS, reconcile_display
 
 D = dt.date
+
+
+def _pts(v) -> str:
+    """Percentage POINTS, signed with the true minus — a gap between two
+    percentages is points, not percent, and printing it as percent is how a
+    3-point miss gets read as a 3% one."""
+    return "%s%.1f pts" % ("+" if v >= 0 else fmt.MINUS, abs(v) * 100)
 
 
 def detail_window(da) -> Dict[str, str]:
@@ -398,9 +406,9 @@ def category_exceptions(da, day: D, **scope) -> List[dict]:
                 "comp_pct": r["comp_pct"], "fleet_comp_pct": fleet,
                 "gap_pts": gap, "threshold_pts": thr,
                 "top_adverse_skus": movers["bottom"][:3],
-                "message": ("%s comps %.1f%% against a fleet %.1f%% — %.1f pts "
-                            "adverse" % (r["category"], r["comp_pct"] * 100,
-                                         fleet * 100, gap * 100)),
+                "message": ("%s comps %s against a fleet %s — %s adverse"
+                            % (r["category"], fmt.pct(r["comp_pct"]),
+                               fmt.pct(fleet), _pts(gap))),
             })
     out.sort(key=lambda r: r["gap_pts"])
     return out
