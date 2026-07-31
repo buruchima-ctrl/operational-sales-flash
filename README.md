@@ -21,15 +21,16 @@ no build step.
 ## Run it
 
 ```bash
-python3 seed.py              # build ops.db and assert every planted storyline
-python3 run_flash.py --all   # compute 60 days, render the site and the digests
-python3 app.py               # serve it at http://127.0.0.1:8765/
+python3 seed.py                  # build ops.db and assert every planted storyline
+python3 run_flash.py --all       # compute 60 days, render both site targets
+python3 app.py                   # serve it at http://127.0.0.1:8765/
+python3 run_flash.py --companion # rebuild the summary companion only
 ```
 
 Or check the whole thing in one command:
 
 ```bash
-python3 run_flash.py --check # seed + storyline assertions + 188 tests + determinism
+python3 run_flash.py --check # seed + storyline assertions + 226 tests + determinism
 ```
 
 The demo clock is fixed: **today is 2026-07-24** and the latest complete day is
@@ -73,6 +74,7 @@ app.py serves it, and can generate today on demand
 | `flash/compute.py` | The per-day object every surface reads, plus the per-day invariants. |
 | `flash/focus.py` | The focus panel and the five exception families. |
 | `flash/render_site.py` | Every page. `flash/render_email.py` is the digest. |
+| `flash/style.py` | The stylesheet — one file, one home, no external asset. |
 
 ---
 
@@ -115,6 +117,40 @@ re-derive several of them a second way.
   variation is a stable hash of (entity, date, tag). Two builds produce the same
   database and the same `render/` tree, bit for bit.
 
+### Exception thresholds
+
+Every threshold lives once, in `catalog.THRESHOLDS`, so a renderer, a test and
+an assertion cannot disagree about what "beyond threshold" means.
+
+| Exception | Threshold | Measured against |
+|---|---|---|
+| Omni family movement | ±15% | the recognized basis vs the day-aligned LY |
+| Category comp | 3 pts below the fleet | the same comp entity set as the headline |
+| New-to-file share | 5 pts below baseline, WTD | the channel's own trailing 4-week WTD |
+| Conversion | 150 bp below baseline, WTD | the door's own trailing 4-week WTD |
+| **UPT** | **±5%, WTD** | **the door's own trailing 4-week WTD** |
+| Favourable / unfavourable key | ±5% | the ±5% triangle on every ops table |
+
+UPT takes a percentage rather than a basis-point threshold because it is a
+ratio of counts, not a percentage of visits — basis points would be a category
+error. It is the only exception that fires in both directions: below baseline
+is a coaching signal, above it is an attach-rate winner the field should be
+copying rather than ignoring.
+
+### UPT is a lever, not a by-product
+
+A door grows two ways: by pulling more people through the door, or by selling
+them more once they are inside. Conversion covers the first. Units per
+transaction covers the second, and it gets the same treatment — a comparison
+against last year wherever it appears (persona rows, store pages, windows,
+slices, the digest, the door extract), a place in the selectable rank KPIs, its
+own exception, and a planted storyline.
+
+The rank page for UPT carries two tables on purpose. The first ranks the
+**level**, and a door with a naturally big assortment will always sit near the
+top of it and tell you nothing. The second ranks the **move** against the
+day-aligned LY on the comp basis, which is the one a field leader can act on.
+
 ### The what-if calculator
 
 The KPI tree pages carry the site's **only** JavaScript. It holds no formula:
@@ -140,9 +176,27 @@ clickable inside the full-depth window.
 
 ---
 
+## Two render targets
+
+| | files | what it carries |
+|---|---:|---|
+| `render/site/` | 2,059 | everything — 60 day flashes, digests, persona landings, districts, doors, hourly views, KPI trees, category and SKU pages, omni panels, rank tables, extracts |
+| `render/companion/` | 601 | the summary tier only — day flashes, digests, the five persona landings, omni / customer / merchandise / category / rank panels, extracts, index |
+
+The companion exists for a host that caps at a thousand files. It renders from
+the **same archived objects** the complete site renders from, so there is no
+second computation — only a smaller selection of pages. The extract CSVs are
+byte-identical between the two trees, and any figure present on both is the
+same figure.
+
+Nothing in it dangles. After writing, every relative link is resolved against
+what actually exists in the companion, and anything that does not is rewritten
+to an absolute URL on the complete site. That is the **only** external link in
+the entire product, and every page carrying one says so.
+
 ## The seeded storylines — where each one surfaces
 
-Twenty-one planted storylines, every one asserted at seed time before the
+Twenty-two planted storylines, every one asserted at seed time before the
 database is allowed to exist. Paths are relative to the site root.
 
 | # | Storyline | Rule | What was planted | Where to see it |
@@ -161,6 +215,7 @@ database is allowed to exist. Paths are relative to the site root.
 | 12 | Canada beats plan, smaller in USD | `BR-16` | The Canadian affiliate beats plan in CAD and contributes less in USD at the seeded fixed rate. | `affiliate/CA/2026-07-23.html` — the currency band and the KPI row |
 | 13 | Three plan grains on one page | `BR-19` | The same trading day read three ways, none of them fabricated. | `day/2026-07-23.html` — "Plan, at each brand's own grain" |
 | 14 | The tree explains the conversion story | `BR-20` | A positive traffic contribution overwhelmed by a negative conversion contribution, composing exactly to the gap. | `store/LB-015/tree/2026-07-23.html` — contributions and the calculator |
+| 22 | Attach-rate winner — the basket lever | `BR-20` | The mirror image of #9. Harborlight Galleria grew sales with traffic flat and conversion steady, by selling more units per transaction. | `store/LB-002/tree/2026-07-23.html` — the AST split; `rank/upt/2026-07-23.html` — the movers table |
 | 15 | Restatement — version 2 | `BR-7` | 2026-07-20 re-issued on the settled basis with a reason string. | `day/2026-07-20-history.html` — both versions and the reason |
 | 16 | Holiday shift — July 4 | `BR-1` | Week-aligned, holiday-aligned and same-calendar-date comps all differ. | `day/2026-07-04.html` — the gold banner and the disclosures |
 | 17 | Late posters, one escalating | `BR-3` | Santa Rosa Plaza missed two days running; Granite Hill Commons missed one. | `day/2026-07-23.html` — the red completeness banner |
@@ -178,13 +233,14 @@ the two cannot drift apart.
 
 Seeding the model — roughly 2.5 fiscal years of daily facts, plus SKU, hourly,
 omni and customer grain across a 14-week detail window — takes about three
-seconds including 45 storyline assertions. Computing 60 days and rendering
-2,045 files takes about eight. Both are byte-identical on a rebuild.
+seconds including 49 storyline assertions. Computing 60 days and rendering both
+targets takes about ten. Every artefact is byte-identical on a rebuild.
 
 ```
-python3 seed.py                                ~3s    45 assertions
-python3 run_flash.py --all                     ~8s    2,045 files, 22 MB
-python3 -m unittest discover -s tests -t .    ~12s    188 tests
+python3 seed.py                                ~3s    49 assertions
+python3 run_flash.py --all                    ~10s    2,660 files, 35 MB
+python3 run_flash.py --companion               ~1s      601 files, 12 MB
+python3 -m unittest discover -s tests -t .    ~13s    226 tests
 ```
 
 ---
