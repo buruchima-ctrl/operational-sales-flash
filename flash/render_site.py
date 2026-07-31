@@ -1019,7 +1019,7 @@ def _day_deep_links(obj, depth) -> str:
                      "below open the most recent full-depth day (%s) rather "
                      "than 404." % esc(date_iso))
     cards = []
-    for label, path, note in (
+    for label, path, blurb in (
             ("Corporate landing", "corporate/%s.html" % date_iso,
              "Timeframe grid, channel and omni donuts, brand rank, trend lines"),
             ("Field Leadership", "field/%s.html" % date_iso,
@@ -1034,7 +1034,7 @@ def _day_deep_links(obj, depth) -> str:
              "Door × brand × the full KPI set, byte-stable")):
         cards.append('<div class="card"><div class="n">Drill</div>'
                      '<div class="h"><a href="%s">%s</a></div>%s</div>'
-                     % (esc(_href(depth, path)), esc(label), esc(note)))
+                     % (esc(_href(depth, path)), esc(label), esc(blurb)))
     return note + '<div class="cards">%s</div>' % "".join(cards)
 
 
