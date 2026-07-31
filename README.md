@@ -31,7 +31,7 @@ python3 run_flash.py --companion # rebuild the summary companion only
 Or check the whole thing in one command:
 
 ```bash
-python3 run_flash.py --check # seed + storyline assertions + 249 tests + determinism
+python3 run_flash.py --check # seed + storyline assertions + 252 tests + determinism
 ```
 
 The demo clock is fixed: **today is 2026-07-24** and the latest complete day is
@@ -150,6 +150,12 @@ explain itself. A door that has not posted is scored on the money its own
 trailing four same-weekday averages say is unaccounted for — the honest size of
 "we do not know", rather than zero. A returns family inverts the sign, because
 less merchandise coming back is a gain.
+
+Scope answers *whose numbers these are*; a second filter answers *whose problem
+it is*. Field Leadership sees doors and door-level omni execution only — a
+district manager cannot re-buy Fragrance or fix e-commerce acquisition, so
+neither belongs at the top of the one block they read. Corporate, Brand, Region
+and Affiliate see every kind. The narrowing is stated on the page.
 
 **A celebration is a threshold-clearing favourable move, never editorial.** It
 comes from the same machinery, the same thresholds and the same catalog calls
@@ -305,7 +311,7 @@ targets takes about ten. Every artefact is byte-identical on a rebuild.
 python3 seed.py                                ~3s    49 assertions
 python3 run_flash.py --all                    ~10s    2,660 files, 35 MB
 python3 run_flash.py --companion               ~1s      601 files, 12 MB
-python3 -m unittest discover -s tests -t .     ~13s    249 tests
+python3 -m unittest discover -s tests -t .     ~13s    252 tests
 ```
 
 ---

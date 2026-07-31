@@ -614,12 +614,25 @@ def _item(kind, key, label, severity, headline, move, driver, impact,
     }
 
 
+# What each persona can ACT on. Scope answers "whose numbers are these"; this
+# answers "whose problem is this". A district manager cannot re-buy Fragrance
+# or fix e-commerce acquisition, so putting either at the top of the Field
+# Leadership page spends the one block they read on someone else's job.
+ACTIONABLE_KINDS = {
+    "corporate": None,                 # None = every kind
+    "brand": None,
+    "region": None,
+    "affiliate": None,
+    "field": ("door", "omni"),         # doors and door-level omni execution
+}
+
+
 def build_headlines(da, day: D, omni_mod, customer_mod, merch_mod,
-                    **scope) -> Dict[str, object]:
+                    kinds=None, **scope) -> Dict[str, object]:
     """The two blocks every persona landing opens with.
 
-    Scope-filtered from one fleet-wide computation (BR-18) — a persona never
-    gets its own arithmetic, only its own slice of the same arithmetic."""
+    Computed in the persona's own scope (BR-18: same arithmetic, different
+    filter) and then narrowed to the item kinds that persona can act on."""
     # Scoped, not filtered. Filtering a fleet list gives a Canada page a
     # headline that says "Makeup comps −6.2%" over a move that reads +16.9%,
     # because the title came from the fleet and the figure came from Canada.
@@ -642,6 +655,9 @@ def build_headlines(da, day: D, omni_mod, customer_mod, merch_mod,
     attention += _plan_movers(da, day, "adverse", **scope)
     celebration += _plan_movers(da, day, "favourable", **scope)
 
+    if kinds:
+        attention = [i for i in attention if i["kind"] in kinds]
+        celebration = [i for i in celebration if i["kind"] in kinds]
     attention = _rank(attention)
     claimed = set()
     for it in attention:
@@ -652,6 +668,12 @@ def build_headlines(da, day: D, omni_mod, customer_mod, merch_mod,
         "attention": attention[:HEADLINE_MAX],
         "celebration": celebration[:HEADLINE_MAX],
         "max_items": HEADLINE_MAX,
+        "kinds": sorted(kinds) if kinds else None,
+        "scope_rule": (
+            "Narrowed to %s — the moves this view can act on. Scope answers "
+            "whose numbers these are; this answers whose problem it is."
+            % ", ".join(sorted(kinds)) if kinds else
+            "Every kind of move in this view's scope."),
         "ranking_rule": (
             "Ranked by the absolute dollar impact of the move against the "
             "day-aligned LY, in %s, within this view's own scope. One rule for "

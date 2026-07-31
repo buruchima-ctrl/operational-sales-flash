@@ -41,7 +41,8 @@ from flash import customer as customer_mod
 from flash import fmt, merch, narrative, omni
 from flash.calendar import ly_holiday_aligned_date
 from flash.catalog import THRESHOLDS, reconcile_display
-from flash.focus import build_exceptions, build_focus, build_headlines, _slug
+from flash.focus import (ACTIONABLE_KINDS, build_exceptions, build_focus,
+                        build_headlines, _slug)
 
 D = dt.date
 
@@ -643,8 +644,9 @@ def _personas(da, day: D, ly_override) -> Dict[str, object]:
             "plan_status": da.plan_status(day, **scope),
             "exceptions": build_exceptions(da, day, omni, customer_mod,
                                            merch, **scope),
-            "headlines": build_headlines(da, day, omni, customer_mod, merch,
-                                         **scope),
+            "headlines": build_headlines(
+                da, day, omni, customer_mod, merch,
+                kinds=ACTIONABLE_KINDS.get(spec["kind"]), **scope),
             "conversion_move": da.conversion_move(day, **scope),
         }
     return out

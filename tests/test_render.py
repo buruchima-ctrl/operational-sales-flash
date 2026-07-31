@@ -968,6 +968,27 @@ class HeadlineBlockCase(unittest.TestCase):
         self.assertIn("absolute dollar impact", txt)
         self.assertIn("threshold-clearing favourable move", txt)
 
+    def test_field_leadership_only_sees_what_a_district_manager_can_fix(self):
+        """Scope says whose numbers these are; actionability says whose problem
+        it is. A district manager cannot re-buy Fragrance or fix e-commerce
+        acquisition, so neither belongs at the top of their one block."""
+        h = self.obj["personas"]["field/field"]["headlines"]
+        kinds = set(i["kind"] for i in h["attention"] + h["celebration"])
+        self.assertTrue(kinds)
+        self.assertTrue(kinds <= {"door", "omni"}, kinds)
+        self.assertIn("act on", h["scope_rule"])
+
+    def test_corporate_sees_every_kind_of_move(self):
+        h = self.obj["personas"]["corporate/corporate"]["headlines"]
+        self.assertIsNone(h["kinds"])
+
+    def test_field_and_corporate_do_not_show_the_same_list(self):
+        f = [i["headline"] for i in
+             self.obj["personas"]["field/field"]["headlines"]["attention"]]
+        c = [i["headline"] for i in
+             self.obj["personas"]["corporate/corporate"]["headlines"]["attention"]]
+        self.assertNotEqual(f, c)
+
     def test_every_item_carries_a_driver(self):
         for h in [self.obj["headlines"]] + [p["headlines"] for p in
                                             self.obj["personas"].values()]:

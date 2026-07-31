@@ -352,8 +352,9 @@ def _headline_blocks(depth: int, h, linked: bool = True) -> str:
                         esc(it["move"]), esc(it["driver"] or "—")))
         o.append('</ol></section>')
     o.append('</div>')
-    o.append('<p class="headrule">%s %s</p>'
-             % (esc(h["ranking_rule"]), esc(h["celebration_rule"])))
+    o.append('<p class="headrule">%s %s %s</p>'
+             % (esc(h.get("scope_rule") or ""), esc(h["ranking_rule"]),
+                esc(h["celebration_rule"])))
     return "".join(o)
 
 
