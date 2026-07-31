@@ -687,6 +687,99 @@ class CompanionCase(unittest.TestCase):
         self.assertLess(n, run_flash.COMPANION_FILE_BUDGET)
 
 
+class PageClaimsCase(unittest.TestCase):
+    """A page must not assert a property it does not have.
+
+    This is the same discipline as a column that adds up: the product's whole
+    argument is that what it prints is checkable, so a sentence claiming
+    something the file itself contradicts is a defect of the same class as a
+    number that does not reconcile — not a copy edit.
+
+    The claims below are assertions about the FILE, so each one is paired with
+    a predicate that reads the file and decides whether it is true."""
+
+    # (regex the page might claim, predicate that must hold if it claims it)
+    CLAIMS = (
+        ("every link is relative",
+         lambda t: 'href="http' not in t,
+         "the page carries an absolute link"),
+        ("no live systems were queried",
+         lambda t: True,
+         "always true of a seeded demo"),
+    )
+
+    def _pages(self, root):
+        for r, _d, fs in os.walk(root):
+            for f in sorted(fs):
+                if f.endswith(".html"):
+                    yield os.path.join(r, f)
+
+    def _check(self, root):
+        broken = []
+        for p in self._pages(root):
+            txt = _read(p)
+            for phrase, holds, why in self.CLAIMS:
+                if re.search(phrase, txt, re.I) and not holds(txt):
+                    broken.append((os.path.relpath(p, root), phrase, why))
+        return broken
+
+    def test_the_complete_site_makes_no_false_claim(self):
+        broken = self._check(dbfixture.site_dir())
+        self.assertEqual(broken[:5], [], "%d pages claim something untrue"
+                         % len(broken))
+
+    def test_the_companion_makes_no_false_claim(self):
+        """The regression: companion digests carried absolute drill links while
+        still printing the complete site's all-relative footer."""
+        broken = self._check(dbfixture.companion_dir())
+        self.assertEqual(broken[:5], [], "%d pages claim something untrue"
+                         % len(broken))
+
+    def test_companion_pages_with_absolute_links_disclose_them(self):
+        comp = dbfixture.companion_dir()
+        base = dbfixture.COMPANION_BASE
+        seen = 0
+        for p in self._pages(comp):
+            txt = _read(p)
+            if 'href="http' not in txt:
+                continue
+            seen += 1
+            visible = _visible(txt)
+            self.assertIn(base, visible,
+                          "%s links out without naming where"
+                          % os.path.relpath(p, comp))
+            self.assertTrue(
+                re.search(r"complete site", visible, re.I),
+                "%s links out without saying so" % os.path.relpath(p, comp))
+        self.assertGreater(seen, 50)
+
+    def test_companion_digests_state_their_own_link_policy(self):
+        comp = dbfixture.companion_dir()
+        checked = 0
+        for p in self._pages(os.path.join(comp, "email")):
+            txt = _read(p)
+            if 'href="http' not in txt:
+                continue
+            checked += 1
+            self.assertIn("resolve inside this companion", txt)
+            self.assertIn("open the complete site", txt)
+            self.assertNotIn("Every link is relative", txt)
+        # Only full-depth days carry exception links into the drill tier, so
+        # the guard is derived from the fixture rather than guessed — it exists
+        # to stop the loop passing vacuously, not to pin a magic number.
+        self.assertGreaterEqual(checked, 1)
+        self.assertLessEqual(checked, dbfixture.SITE_FULL)
+
+    def test_the_complete_sites_digest_keeps_the_relative_claim(self):
+        """Because there it is true, and weakening a true statement to make a
+        test pass everywhere is its own kind of dishonesty."""
+        site = dbfixture.site_dir()
+        obj = dbfixture.site_objects()[-1]
+        txt = _read(os.path.join(site, "email", "%s.html" % obj["date"]))
+        self.assertIn("Every link is relative", txt)
+        self.assertNotIn('href="http', txt)
+
+
 class PersonaPageCase(unittest.TestCase):
     """BR-18 on the surface: the same figure, wherever it appears."""
 

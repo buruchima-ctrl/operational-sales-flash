@@ -189,6 +189,14 @@ def _headline(a, obj, d):
 
 def _banners(a, obj, d):
     c = obj["comp"]
+    base = obj.get("companion_base")
+    if base:
+        _banner(a, BLUE, "#E9F0F7",
+                "Summary companion — drill-down lives on the complete site",
+                "This digest and the pages it links to are the summary tier. "
+                "Door, district, hourly, KPI-tree and SKU links below open the "
+                "complete site at %s. Both render from the same computed "
+                "object, so the figures are identical (BR-13)." % base)
     if c["override_in_effect"]:
         _banner(a, GOLD, "#FBF4E4", "Holiday alignment in effect",
                 "Leading comp %s is measured against %s — the same holiday last "
@@ -257,6 +265,11 @@ def _exceptions(a, obj, d):
         a('<div style="font-family:%s;font-size:12px;line-height:1.45;color:%s;'
           'padding-top:2px;">%s</div>' % (BODY, INK_SOFT, esc(e["detail"])))
         a('</div>')
+    if items and obj.get("companion_base") and obj.get("deep_links"):
+        a('<div style="font-family:%s;font-size:11px;color:%s;padding-top:8px;">'
+          'Exception headlines link to the door and KPI-tree pages behind them. '
+          'Those live on the complete site, so these links leave this '
+          'companion.</div>' % (DATA, INK_SOFT))
     a('</td></tr>')
 
 
@@ -385,11 +398,32 @@ def _links(a, obj, d):
           'links open %s, the most recent full-depth day.</div>'
           % (DATA, INK_SOFT, esc(target)))
     a('<div style="font-family:%s;font-size:11px;color:%s;padding-top:6px;">'
-      'Every link is relative, so it resolves from a local file, from the '
-      'demo server and from wherever this site is hosted. The numbers behind '
-      'them are the same computed object this digest printed (BR-13).</div>'
-      % (DATA, INK_SOFT))
+      '%s</div>' % (DATA, INK_SOFT, esc(_link_policy(obj))))
     a('</td></tr>')
+
+
+def _link_policy(obj) -> str:
+    """What is true of THIS digest's links — not what is true of the product.
+
+    The complete site's digest is entirely relative, and said so. The
+    companion's digest is not: its exception links reach door and KPI-tree
+    pages that the companion does not carry, and those are rewritten to
+    absolute URLs on the complete site. Repeating the all-relative sentence
+    there printed a claim the file itself contradicts, which is the same
+    failure as a number that does not reconcile — the page asserting a
+    property it does not have."""
+    base = obj.get("companion_base")
+    if not base:
+        return ("Every link is relative, so it resolves from a local file, "
+                "from the demo server and from wherever this site is hosted. "
+                "The numbers behind them are the same computed object this "
+                "digest printed (BR-13).")
+    return ("Links to this digest's own day flash and panels are relative and "
+            "resolve inside this companion. Links into door, district, "
+            "hourly, KPI-tree and SKU pages are absolute and open the complete "
+            "site at %s — this companion does not carry them. The numbers "
+            "behind every one of them are the same computed object this "
+            "digest printed (BR-13)." % base)
 
 
 def _disclosures(a, obj):
