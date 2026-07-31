@@ -45,6 +45,13 @@ from flash.calendar import NRFCalendar                    # noqa: E402
 D = dt.date
 RENDER_DIR = os.path.join(HERE, "render")
 SITE_DIR = os.path.join(RENDER_DIR, "site")
+COMPANION_DIR = os.path.join(RENDER_DIR, "companion")
+# The complete site's home. The companion is hosted somewhere that caps at a
+# thousand files, so links it cannot satisfy point here — the one sanctioned
+# external link in the product, and it is disclosed on every page that carries
+# one.
+COMPLETE_SITE_URL = "https://buruchima-ctrl.github.io/operational-sales-flash/"
+COMPANION_FILE_BUDGET = 1000
 DB_PATH = os.path.join(HERE, "ops.db")
 REGEN_BUDGET_S = 60.0
 
@@ -224,12 +231,13 @@ def _db(rebuild_if_missing: bool = True):
     return sqlite3.connect(DB_PATH)
 
 
-def _reset_render():
+def _reset_render(*dirs):
     """A full regeneration starts from an empty tree. Rendering over the top of
     an old run leaves orphans behind, and an archive with a stale page in it is
     exactly the quiet inconsistency this product exists to remove."""
-    if os.path.isdir(SITE_DIR):
-        shutil.rmtree(SITE_DIR)
+    for d in (dirs or (SITE_DIR, COMPANION_DIR)):
+        if os.path.isdir(d):
+            shutil.rmtree(d)
 
 
 def _write_digest(obj, stem: str) -> str:
@@ -256,6 +264,15 @@ def _build_site(conn):
         SITE_DIR, days, storylines=storyline_index(),
         today=archive.TODAY.isoformat(),
         anchor=archive.LATEST_COMPLETE.isoformat(), sku_index=sku_index)
+
+
+def _build_companion(conn):
+    days = _archive_days(conn)
+    paths, externalized = render_site.build_companion(
+        COMPANION_DIR, days, COMPLETE_SITE_URL,
+        storylines=storyline_index(), today=archive.TODAY.isoformat(),
+        anchor=archive.LATEST_COMPLETE.isoformat())
+    return paths, externalized
 
 
 def _count_files(root) -> int:
@@ -313,12 +330,17 @@ def cmd_all() -> int:
           % (rd, v1["display"]["net_sales"], v2["display"]["net_sales"]))
 
     conn.commit()
-    print("[3/4] Rendering the site ...")
+    print("[3/5] Rendering the complete site ...")
     paths = _build_site(conn)
-    conn.close()
     print("      %d site files written" % len(paths))
 
-    print("[4/4] Checking the budget ...")
+    print("[4/5] Rendering the summary companion ...")
+    cpaths, ext = _build_companion(conn)
+    conn.close()
+    print("      %d companion files (budget %d); %d links pointed at the "
+          "complete site" % (len(cpaths), COMPANION_FILE_BUDGET, ext))
+
+    print("[5/5] Checking the budgets ...")
     files = _count_files(RENDER_DIR)
     size = _tree_size(RENDER_DIR)
     elapsed = time.time() - t0
@@ -328,6 +350,11 @@ def cmd_all() -> int:
     print("Largest page: %s (%.0f KB; budget 150 KB)" % biggest)
     print("Browse it:  python3 app.py   then open http://127.0.0.1:8765/")
     rc = 0
+    n_companion = _count_files(COMPANION_DIR)
+    if n_companion >= COMPANION_FILE_BUDGET:
+        print("BUDGET FAILED: the companion is %d files against a %d cap."
+              % (n_companion, COMPANION_FILE_BUDGET))
+        rc = 1
     if elapsed > REGEN_BUDGET_S:
         print("NFR FAILED: full regeneration took %.1fs, budget is %.0fs."
               % (elapsed, REGEN_BUDGET_S))
@@ -391,6 +418,32 @@ def cmd_date(iso: str) -> int:
     return 0
 
 
+# -- --companion ------------------------------------------------------------
+
+def cmd_companion() -> int:
+    t0 = time.time()
+    if not os.path.isfile(DB_PATH):
+        raise SystemExit("ops.db is missing. Run: python3 seed.py")
+    conn = sqlite3.connect(DB_PATH)
+    if not _archive_days(conn):
+        conn.close()
+        raise SystemExit("The archive is empty. Run: python3 run_flash.py --all")
+    _reset_render(COMPANION_DIR)
+    paths, ext = _build_companion(conn)
+    conn.close()
+    n = _count_files(COMPANION_DIR)
+    size = _tree_size(COMPANION_DIR)
+    print("Summary companion — %d files, %.1f MB, built in %.1fs"
+          % (n, size / 1024.0 / 1024.0, time.time() - t0))
+    print("  budget %d files; %d links point at %s"
+          % (COMPANION_FILE_BUDGET, ext, COMPLETE_SITE_URL))
+    if n >= COMPANION_FILE_BUDGET:
+        print("BUDGET FAILED: %d files against a %d cap."
+              % (n, COMPANION_FILE_BUDGET))
+        return 1
+    return 0
+
+
 # -- --check ----------------------------------------------------------------
 
 def cmd_check() -> int:
@@ -443,14 +496,19 @@ def main(argv=None):
     ap.add_argument("--date", nargs="?", const="", default=None,
                     help="flash date YYYY-MM-DD (default: the latest complete day)")
     ap.add_argument("--all", action="store_true",
-                    help="regenerate the 60-day archive, the tiered site and "
-                         "the morning digests")
+                    help="regenerate the 60-day archive, the tiered site, the "
+                         "summary companion and the morning digests")
+    ap.add_argument("--companion", action="store_true",
+                    help="rebuild only the summary companion from the existing "
+                         "archive")
     args = ap.parse_args(argv)
 
     if args.check:
         return cmd_check()
     if args.all:
         return cmd_all()
+    if args.companion:
+        return cmd_companion()
     if args.date is not None:
         return cmd_date(args.date)
     ap.print_help()

@@ -108,6 +108,27 @@ def build_site_into(path):
                                   sku_index=sku_index)
 
 
+COMPANION_BASE = "https://example.invalid/complete-site/"
+
+
+def build_companion_into(path):
+    from flash import render_site                  # noqa: E402
+    objs = site_objects()
+    return render_site.build_companion(
+        path, site_days(objs), COMPANION_BASE, storylines=None,
+        today=seed.TODAY.isoformat(), anchor=objs[-1]["date"])
+
+
+def companion_dir():
+    """A rendered fixture companion, built once and torn down at exit."""
+    if "companion" not in _STATE:
+        path = tempfile.mkdtemp(prefix="opsflash-comp-")
+        build_companion_into(path)
+        _STATE["companion"] = path
+        atexit.register(lambda: shutil.rmtree(path, ignore_errors=True))
+    return _STATE["companion"]
+
+
 def site_dir():
     """A rendered fixture site, built once and torn down at exit."""
     if "site" not in _STATE:

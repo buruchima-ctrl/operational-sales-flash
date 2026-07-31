@@ -574,6 +574,119 @@ class UptSurfaceCase(unittest.TestCase):
         self.assertGreater(split["upt"], abs(split["aus"]))
 
 
+class CompanionCase(unittest.TestCase):
+    """The summary companion: fewer pages, the same numbers, and no link that
+    goes nowhere."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.site = dbfixture.site_dir()
+        cls.comp = dbfixture.companion_dir()
+        cls.base = dbfixture.COMPANION_BASE
+        cls.obj = dbfixture.site_objects()[-1]
+        cls.date = cls.obj["date"]
+
+    def _files(self, root):
+        out = []
+        for r, _d, fs in os.walk(root):
+            for f in fs:
+                out.append(os.path.relpath(os.path.join(r, f), root)
+                           .replace(os.sep, "/"))
+        return sorted(out)
+
+    def test_the_companion_is_a_strict_subset_of_the_site(self):
+        site, comp = set(self._files(self.site)), set(self._files(self.comp))
+        self.assertTrue(comp.issubset(site),
+                        "companion has paths the site does not: %s"
+                        % sorted(comp - site)[:5])
+        self.assertLess(len(comp), len(site))
+
+    def test_it_carries_the_summary_tier_and_drops_the_drill_tier(self):
+        comp = self._files(self.comp)
+        for prefix in ("day/", "email/", "corporate/", "brand/", "region/",
+                       "affiliate/", "field/", "omni/", "customer/", "merch/",
+                       "category/", "rank/", "extracts/", "assets/"):
+            self.assertTrue(any(f.startswith(prefix) for f in comp), prefix)
+        for prefix in ("store/", "district/", "sku/"):
+            self.assertFalse(any(f.startswith(prefix) for f in comp), prefix)
+        self.assertIn("index.html", comp)
+
+    def test_every_link_either_resolves_locally_or_goes_to_the_complete_site(self):
+        local = set(self._files(self.comp))
+        checked = external = 0
+        for r, _d, fs in os.walk(self.comp):
+            for f in fs:
+                if not f.endswith(".html"):
+                    continue
+                base = os.path.relpath(r, self.comp).replace(os.sep, "/")
+                base = "" if base == "." else base
+                for h in HREF_RE.findall(_read(os.path.join(r, f))):
+                    if h.startswith(("#", "mailto:", "data:")):
+                        continue
+                    if h.startswith(("http://", "https://")):
+                        external += 1
+                        self.assertTrue(h.startswith(self.base),
+                                        "unsanctioned external link %s" % h)
+                        continue
+                    checked += 1
+                    t = posixpath.normpath(posixpath.join(base, h.split("#")[0]))
+                    self.assertIn(t, local, "%s -> %s is dead" % (f, h))
+        self.assertGreater(checked, 200)
+        self.assertGreater(external, 100)
+
+    def test_pages_carrying_an_external_link_disclose_it(self):
+        for rel in ("index.html", "day/%s.html" % self.date,
+                    "corporate/%s.html" % self.date,
+                    "rank/net_sales/%s.html" % self.date):
+            txt = _read(os.path.join(self.comp, rel))
+            if self.base not in txt:
+                continue
+            self.assertIn("complete site", txt, rel)
+
+    def test_the_figures_are_the_sites_figures(self):
+        """BR-13/BR-18/BR-21: same computed object, so any figure present on
+        both sites is the same figure."""
+        num = re.compile(r"[\u2212+]?\$[\d,]+(?:\.\d+)?|[\u2212+]?\d+\.\d+%")
+        for rel in ("day/%s.html" % self.date, "merch/%s.html" % self.date,
+                    "customer/%s.html" % self.date,
+                    "corporate/%s.html" % self.date,
+                    "omni/BOPIS/%s.html" % self.date):
+            a_ = set(num.findall(_read(os.path.join(self.site, rel))))
+            b_ = set(num.findall(_read(os.path.join(self.comp, rel))))
+            self.assertEqual(a_, b_, rel)
+
+    def test_the_extract_csvs_are_byte_identical(self):
+        for f in sorted(os.listdir(os.path.join(self.comp, "extracts"))):
+            a_ = os.path.join(self.site, "extracts", f)
+            b_ = os.path.join(self.comp, "extracts", f)
+            with open(a_, "rb") as fa, open(b_, "rb") as fb:
+                self.assertEqual(fa.read(), fb.read(), f)
+
+    def test_the_companion_renders_byte_identically(self):
+        hashes = []
+        for _ in range(2):
+            path = tempfile.mkdtemp(prefix="opsflash-compdet-")
+            try:
+                dbfixture.build_companion_into(path)
+                h = hashlib.sha256()
+                for r, dirs, files in os.walk(path):
+                    dirs.sort()
+                    for f in sorted(files):
+                        full = os.path.join(r, f)
+                        h.update(os.path.relpath(full, path).encode("utf-8"))
+                        with open(full, "rb") as fh:
+                            h.update(fh.read())
+                hashes.append(h.hexdigest())
+            finally:
+                shutil.rmtree(path, ignore_errors=True)
+        self.assertEqual(hashes[0], hashes[1])
+
+    def test_it_stays_well_under_the_host_file_cap(self):
+        import run_flash
+        n = len(self._files(self.comp))
+        self.assertLess(n, run_flash.COMPANION_FILE_BUDGET)
+
+
 class PersonaPageCase(unittest.TestCase):
     """BR-18 on the surface: the same figure, wherever it appears."""
 

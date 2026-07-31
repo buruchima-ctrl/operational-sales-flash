@@ -31,6 +31,8 @@ from __future__ import annotations
 import datetime as dt
 import json
 import os
+import posixpath
+import re
 from html import escape as esc
 from typing import Dict, List, Optional
 
@@ -172,6 +174,33 @@ def _currency_band(obj, local_ccy: str, local_total=None,
         % (esc(what), esc(local_ccy), esc(native), esc(shown),
            esc(fmt.ratio(rate)), esc(local_ccy), esc(reporting),
            esc(disclosure)))
+
+
+COMPANION_TIERS = ("day", "email", "corporate", "brand", "region", "affiliate",
+                   "field", "omni", "customer", "merch", "category", "rank",
+                   "extracts")
+
+
+def _companion_band(obj_or_base) -> str:
+    """The one sanctioned external link on the whole product, disclosed.
+
+    The companion carries the summary tier only, because its host caps at a
+    thousand files. Rather than hide the doors, districts and SKUs that do not
+    fit, every page that links into them says where they went and links out. A
+    link that silently 404s and a link that quietly leaves the site are both
+    worse than a link that tells you it is leaving."""
+    base = (obj_or_base if isinstance(obj_or_base, str)
+            else (obj_or_base or {}).get("companion_base"))
+    if not base:
+        return ""
+    return _band(
+        "note", "Summary companion — full drill-down lives on the complete site",
+        'This companion carries the daily flash, the morning digests, the five '
+        'persona landings and the omni, customer, merchandise, category and '
+        'rank panels. Door, district, hourly, KPI-tree and SKU pages live on '
+        'the complete site at <a href="%s">%s</a>, and every link to one of '
+        'them below goes there. The figures are identical: both sites render '
+        'from the same computed object (BR-13).' % (esc(base), esc(base)))
 
 
 def _fav_key() -> str:
@@ -546,6 +575,7 @@ def render_day(obj, nav: Optional[Dict[str, object]] = None) -> str:
     a = o.append
 
     a(_persona_nav(depth, deep_date(obj), "day"))
+    a(_companion_band(obj))
     a(_header(
         "%s · %s" % (obj["company"], obj["product"]),
         d["date_long"],
@@ -1038,6 +1068,7 @@ def render_persona(obj, persona_key: str, nav: Dict[str, object]) -> str:
     a = o.append
 
     a(_persona_nav(depth, date_iso, p["kind"]))
+    a(_companion_band(obj))
     a(_crumbs(depth, nav["crumbs"]))
     a(_header("%s view · %s" % (p["persona_label"], obj["product"]),
               "%s — %s" % (p["label"], d["date_long"]),
@@ -1795,7 +1826,7 @@ def render_category(obj, category: str, nav) -> str:
     m = obj["merch"]
     row = next(r for r in m["categories"]["categories"] if r["category"] == category)
     movers = None
-    o = [_persona_nav(depth, obj["date"], "day"), _crumbs(depth, nav["crumbs"]),
+    o = [_persona_nav(depth, obj["date"], "day"), _companion_band(obj), _crumbs(depth, nav["crumbs"]),
          _header("Category · %s" % (row["brand_id"] or ""),
                  "%s — %s" % (category, d["date_long"]),
                  "Derived from sales lines; brand and category are never stored "
@@ -1895,7 +1926,7 @@ def render_sku(sku, series, nav) -> str:
 def render_omni(obj, family: str, nav) -> str:
     depth = nav["depth"]
     d = obj["display"]
-    o = [_persona_nav(depth, obj["date"], "day"), _crumbs(depth, nav["crumbs"]),
+    o = [_persona_nav(depth, obj["date"], "day"), _companion_band(obj), _crumbs(depth, nav["crumbs"]),
          _header("Omni panel", "%s — %s" % (OMNI_TITLES[family], d["date_long"]),
                  "Recognized and all-inclusive bases, stated separately (BR-10)")]
     f = obj["omni"]["families"][family]
@@ -2014,7 +2045,7 @@ def render_customer(obj, nav) -> str:
     depth = nav["depth"]
     d = obj["display"]
     c = obj["customer"]
-    o = [_persona_nav(depth, obj["date"], "day"), _crumbs(depth, nav["crumbs"]),
+    o = [_persona_nav(depth, obj["date"], "day"), _companion_band(obj), _crumbs(depth, nav["crumbs"]),
          _header("Customer panel", "Customer file — %s" % d["date_long"],
                  "New-to-file derives only from each customer's first purchase "
                  "date (BR-12)")]
@@ -2089,7 +2120,7 @@ def render_merch(obj, nav) -> str:
     depth = nav["depth"]
     d = obj["display"]
     m = obj["merch"]
-    o = [_persona_nav(depth, obj["date"], "day"), _crumbs(depth, nav["crumbs"]),
+    o = [_persona_nav(depth, obj["date"], "day"), _companion_band(obj), _crumbs(depth, nav["crumbs"]),
          _header("Merchandise panel", "Merchandise — %s" % d["date_long"],
                  "Category and brand are derived from the SKU, never stored on "
                  "a fact row")]
@@ -2144,7 +2175,7 @@ def render_rank(obj, kpi: str, nav) -> str:
     depth = nav["depth"]
     d = obj["display"]
     r = obj["ranks"][kpi]
-    o = [_persona_nav(depth, obj["date"], "day"), _crumbs(depth, nav["crumbs"]),
+    o = [_persona_nav(depth, obj["date"], "day"), _companion_band(obj), _crumbs(depth, nav["crumbs"]),
          _header("Rank", "%s — %s" % (RANK_LABELS[kpi], d["date_long"]),
                  "%d doors ranked; doors where this KPI cannot be computed are "
                  "listed separately, never sorted to the bottom as zero"
@@ -2269,16 +2300,25 @@ def day_href(date_iso: str, version: int = 1) -> str:
 
 
 def render_index(days: List[dict], storylines=None, today: Optional[str] = None,
-                 full_depth_dates=None, anchor: Optional[str] = None) -> str:
+                 full_depth_dates=None, anchor: Optional[str] = None,
+                 companion_base: Optional[str] = None) -> str:
     full_depth_dates = set(full_depth_dates or [])
     anchor = anchor or (days[-1]["date"] if days else "")
-    o = [_persona_nav(0, anchor, "index")]
+    o = [_persona_nav(0, anchor, "index"), _companion_band(companion_base)]
     o.append(_header(
         "Lumière Beauty Group · Operational Sales Flash",
         "The archive",
         "%d generated days ending %s · demo clock fixed at %s · full drill-down "
         "for the last %d days"
         % (len(days), esc(anchor), esc(today or ""), len(full_depth_dates))))
+    if companion_base:
+        o.append(_band(
+            "gold", "This is the summary companion",
+            'Every day\'s flash, digest and panel is here. The door, district, '
+            'hourly, KPI-tree and SKU pages are on the complete site at '
+            '<a href="%s">%s</a>. Both render from the same computed object, '
+            'so any figure you can find in both places is the same figure '
+            '(BR-13).' % (esc(companion_base), esc(companion_base))))
     o.append(_band("note", "How this archive is tiered",
                    "Every one of the %d days has its own flash page and its "
                    "restatement history. The last %d days additionally carry "
@@ -2493,6 +2533,185 @@ def build_site(out_dir: str, days: List[dict], storylines=None,
                                       full_depth_dates=full_dates,
                                       anchor=anchor)))
     return sorted(written)
+
+
+# =========================================================================
+# The companion — the summary tier, for a host that caps at 1,000 files
+# =========================================================================
+
+def build_companion(out_dir: str, days: List[dict], base_url: str,
+                    storylines=None, today: Optional[str] = None,
+                    anchor: Optional[str] = None) -> List[str]:
+    """Render the summary tier only, then point every link it cannot satisfy
+    at the complete site.
+
+    Two rules make this safe. First, it renders from the SAME archived objects
+    the full site renders from, so a figure here is the same figure there
+    (BR-13, BR-18, BR-21) — there is no second computation, only a smaller
+    selection of pages. Second, nothing is left dangling: after writing, every
+    relative link is resolved against what actually exists in this tree, and
+    anything that does not is rewritten to an absolute URL on the complete
+    site. A page that carries such a link says so."""
+    written = [write(os.path.join(out_dir, "assets", "site.css"), CSS)]
+    days = sorted(days, key=lambda e: e["date"])
+    full_dates = [e["date"] for e in days
+                  if e["versions"][0]["obj"].get("depth") == "full"]
+    anchor = anchor or (days[-1]["date"] if days else "")
+    trend_series = _trend_series(days)
+
+    for i, entry in enumerate(days):
+        date_iso = entry["date"]
+        versions = entry["versions"]
+        is_full = versions[0]["obj"].get("depth") == "full"
+        vlinks = [{"version": v["obj"]["version"],
+                   "href": day_href(date_iso, v["obj"]["version"])}
+                  for v in versions]
+        history = ("%s-history.html" % date_iso) if len(versions) > 1 else None
+        prev_e = days[i - 1] if i > 0 else None
+        next_e = days[i + 1] if i + 1 < len(days) else None
+
+        for v in versions:
+            obj = v["obj"]
+            tag_depth(obj, full_dates, anchor)
+            obj["companion"] = True
+            obj["companion_base"] = base_url
+            nav = {
+                "stem_href": day_href(date_iso, obj["version"]),
+                "versions": vlinks, "history": history,
+                "email": "../email/%s.html" % date_iso,
+                "extract": ("../extracts/%s-doors.csv" % date_iso) if is_full else None,
+                "deep": is_full,
+                "prev_href": day_href(prev_e["date"]) if prev_e else None,
+                "prev_label": (prev_e["versions"][0]["obj"]["display"]["date_short"]
+                               if prev_e else None),
+                "next_href": day_href(next_e["date"]) if next_e else None,
+                "next_label": (next_e["versions"][0]["obj"]["display"]["date_short"]
+                               if next_e else None),
+            }
+            written.append(write(
+                os.path.join(out_dir, "day", day_href(date_iso, obj["version"])),
+                render_day(obj, nav)))
+            written.append(write(
+                os.path.join(out_dir, "email", "%s.html" % (
+                    date_iso if obj["version"] == 1
+                    else "%s-v%d" % (date_iso, obj["version"]))),
+                _render_digest(obj)))
+        if history:
+            written.append(write(os.path.join(out_dir, "day", history),
+                                 render_history(versions)))
+        if is_full:
+            written += _build_companion_panels(out_dir, versions[0]["obj"],
+                                               trend_series)
+
+    written.append(write(os.path.join(out_dir, "index.html"),
+                         render_index(days, storylines=storylines, today=today,
+                                      full_depth_dates=full_dates, anchor=anchor,
+                                      companion_base=base_url)))
+    externalized = _externalize(out_dir, base_url)
+    return sorted(written), externalized
+
+
+def _render_digest(obj):
+    from flash import render_email
+    return render_email.render(obj)
+
+
+def _build_companion_panels(out_dir: str, obj, trend_series) -> List[str]:
+    """Persona landings and the four panel families — no doors, no districts,
+    no SKU pages. Those are the file-count tail, and they are exactly what the
+    complete site is for."""
+    date_iso = obj["date"]
+    short = obj["display"]["date_short"]
+    written = []
+    for key, p in sorted(obj["personas"].items()):
+        kind, pkey = key.split("/", 1)
+        depth = 1 if kind in ("corporate", "field") else 2
+        path = ("%s/%s.html" % (kind, date_iso) if depth == 1
+                else "%s/%s/%s.html" % (kind, _persona_dir(kind, pkey), date_iso))
+        nav = {"depth": depth,
+               "crumbs": _crumb_base(date_iso, short) + [(p["label"], None)],
+               "trend_series": trend_series}
+        written.append(write(os.path.join(out_dir, path),
+                             render_persona(obj, key, nav)))
+    for fam in obj["omni"]["family_order"]:
+        nav = {"depth": 2, "crumbs": _crumb_base(date_iso, short)
+               + [(OMNI_TITLES[fam], None)]}
+        written.append(write(
+            os.path.join(out_dir, "omni", fam, "%s.html" % date_iso),
+            render_omni(obj, fam, nav)))
+    nav = {"depth": 1, "crumbs": _crumb_base(date_iso, short) + [("Customer", None)]}
+    written.append(write(os.path.join(out_dir, "customer", "%s.html" % date_iso),
+                         render_customer(obj, nav)))
+    nav = {"depth": 1, "crumbs": _crumb_base(date_iso, short) + [("Merchandise", None)]}
+    written.append(write(os.path.join(out_dir, "merch", "%s.html" % date_iso),
+                         render_merch(obj, nav)))
+    if obj["merch"]["available"]:
+        for c in obj["merch"]["categories"]["categories"]:
+            nav = {"depth": 2, "crumbs": _crumb_base(date_iso, short)
+                   + [("Merchandise", "merch/%s.html" % date_iso),
+                      (c["category"], None)]}
+            written.append(write(
+                os.path.join(out_dir, "category", _slug(c["category"]),
+                             "%s.html" % date_iso),
+                render_category(obj, c["category"], nav)))
+    for kpi in sorted(obj["ranks"]):
+        nav = {"depth": 2, "crumbs": _crumb_base(date_iso, short)
+               + [("Rank — %s" % RANK_LABELS[kpi], None)]}
+        written.append(write(
+            os.path.join(out_dir, "rank", kpi, "%s.html" % date_iso),
+            render_rank(obj, kpi, nav)))
+    written.append(write(
+        os.path.join(out_dir, "extracts", "%s-doors.csv" % date_iso),
+        render_extract_csv(obj)))
+    return written
+
+
+_HREF_RE = re.compile(r'((?:href|src)=")([^"]+)(")')
+
+
+def _externalize(out_dir: str, base_url: str) -> int:
+    """Rewrite every relative link the companion cannot satisfy into an
+    absolute link on the complete site. Returns how many were rewritten.
+
+    Deterministic: a sorted walk, a pure regex substitution, and a target set
+    read off the tree that was just written."""
+    base = base_url.rstrip("/") + "/"
+    existing = set()
+    for root, dirs, files in os.walk(out_dir):
+        dirs.sort()
+        for f in files:
+            existing.add(os.path.relpath(os.path.join(root, f),
+                                         out_dir).replace(os.sep, "/"))
+    count = 0
+    for root, dirs, files in sorted(os.walk(out_dir)):
+        dirs.sort()
+        for f in sorted(files):
+            if not f.endswith(".html"):
+                continue
+            path = os.path.join(root, f)
+            here = os.path.relpath(root, out_dir).replace(os.sep, "/")
+            here = "" if here == "." else here
+            with open(path, encoding="utf-8") as fh:
+                text = fh.read()
+            hits = [0]
+
+            def fix(m):
+                href = m.group(2)
+                if href.startswith(("http://", "https://", "mailto:", "#",
+                                    "data:")):
+                    return m.group(0)
+                bare = href.split("#")[0]
+                target = posixpath.normpath(posixpath.join(here, bare))
+                if target in existing:
+                    return m.group(0)
+                hits[0] += 1
+                return m.group(1) + base + target + m.group(3)
+
+            new = _HREF_RE.sub(fix, text)
+            if hits[0]:
+                count += hits[0]
+                write(path, new)
+    return count
 
 
 def _trend_series(days) -> List[dict]:
