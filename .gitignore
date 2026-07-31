@@ -1,0 +1,31 @@
+# Generated database — rebuild with: python3 seed.py
+ops.db
+*.db
+
+# Local planning documents (private working material — never published)
+00-Ref-Omni-Reconciliation.md
+01-Strategy.md
+02-BRD.md
+03-PRD.md
+HANDOFF.md
+
+# Source reference material — not for the public repo
+*.pptx
+*.docx
+~$*.pptx
+~$*.docx
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# here.now local state (contains claim tokens)
+.herenow/
+
+# macOS
+.DS_Store
+
+# Scratch
+scratch/
+*.tmp
