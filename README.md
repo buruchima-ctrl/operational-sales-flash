@@ -1,5 +1,7 @@
 # Lumière Ops Flash
 
+**Live demo:** https://buruchima-ctrl.github.io/operational-sales-flash/
+
 The **operational** daily sales flash for Lumière Beauty Group — a fictional
 three-brand prestige beauty house trading 29 doors across two country markets
 plus e-commerce.
