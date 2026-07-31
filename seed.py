@@ -268,6 +268,24 @@ CA_BEAT_MULT = 1.13
 # 13 Plan-grain story: structural (one brand per grain), asserted on the anchor
 # 14 Tree story: derived from storyline 9's data, asserted on the anchor
 
+# 22 Attach-rate winner — the mirror image of storyline 9.
+# Traffic flat, conversion steady, basket bigger: the door grows sales by
+# selling MORE UNITS per transaction, not by pulling more people through the
+# door. Seeded as a basket lever rather than a volume lever, so the identity
+# sales = traffic x conversion x AST does the work: AOV (=AST) rises with net
+# sales, which leaves transactions — and therefore traffic and conversion —
+# untouched, and UPT carries the AST gain.
+ATTACH_STORE = "LB-002"
+ATTACH_START = D(2026, 7, 10)
+ATTACH_SALES_MULT = 1.13
+ATTACH_AOV_MULT = 1.13            # keeps transactions (and so traffic) flat
+ATTACH_UPT_MULT = 1.16            # the lever itself
+
+# Day-to-day basket variation. Without it UPT is a constant per door, no
+# coaching exception could ever fire, and the tree's AUS x UPT split would be
+# decorative.
+UPT_DAILY_NOISE = 0.06            # +/-3%
+
 # Missing-traffic incident (BR-15: conversion unavailable, never 0%).
 TRAFFIC_MISSING = {("LB-011", D(2026, 7, 22)), ("LB-011", D(2026, 7, 23))}
 
@@ -481,7 +499,23 @@ def storyline_mult(entity_id, day):
         m *= DIVERGE_MULT
     if entity_id in CA_BEAT_STORES and CA_BEAT_START <= day <= LATEST_COMPLETE:
         m *= CA_BEAT_MULT
+    if entity_id == ATTACH_STORE and ATTACH_START <= day <= LATEST_COMPLETE:
+        m *= ATTACH_SALES_MULT
     return m
+
+
+def basket_mults(entity_id, day):
+    """(aov_mult, upt_mult) — the BASKET levers, kept separate from the volume
+    lever above.
+
+    A door can grow two ways: more transactions, or bigger transactions. The
+    seed models them separately so the KPI tree can tell them apart, which is
+    the whole point of decomposing AST into AUS x UPT."""
+    aov_m = upt_m = 1.0
+    if entity_id == ATTACH_STORE and ATTACH_START <= day <= LATEST_COMPLETE:
+        aov_m *= ATTACH_AOV_MULT
+        upt_m *= ATTACH_UPT_MULT
+    return aov_m, upt_m
 
 
 def daily_mean(entity, fiscal_year, period, dow, day):
@@ -500,16 +534,26 @@ def base_sales(entity, day, fiscal_year, period, dow):
             * storyline_mult(entity["entity_id"], day))
 
 
-def txn_units(entity, net):
-    """Transactions and units. AOV/UPT are fixed per entity, so transactions
-    track sales — which is what makes the KPI tree's driver algebra legible."""
+def txn_units(entity, net, day):
+    """Transactions and units.
+
+    AOV is a per-door trait times any basket storyline, so transactions track
+    sales except where a storyline deliberately moves the basket instead of the
+    footfall. UPT carries a small daily variation on top of its door trait, so
+    that units per transaction is a signal a district manager can coach rather
+    than a constant."""
+    eid = entity["entity_id"]
+    aov_m, upt_m = basket_mults(eid, day)
     if entity["channel"] == "STORE":
-        aov = 45.0 + 45.0 * u(entity["entity_id"], "aov")
+        aov = 45.0 + 45.0 * u(eid, "aov")
     else:
-        aov = 65.0 + 30.0 * u(entity["entity_id"], "aov")
+        aov = 65.0 + 30.0 * u(eid, "aov")
     if entity["currency"] == "CAD":
         aov *= FX_CAD_PER_USD          # local-currency basket (BR-16)
-    upt = 1.8 + 1.6 * u(entity["entity_id"], "upt")
+    aov *= aov_m
+    upt = (1.8 + 1.6 * u(eid, "upt")) * upt_m * (
+        (1.0 - UPT_DAILY_NOISE / 2.0)
+        + UPT_DAILY_NOISE * u(eid, day.isoformat(), "uptn"))
     txns = max(1, int(round(net / aov)))
     units = max(txns, int(round(txns * upt)))
     return txns, units
@@ -690,7 +734,7 @@ def gen_day_facts(cal, entities):
                 demand, shipped, returns = ecom_series(e, day, net, cal)
                 net = demand
             net = round(net, 2)
-            txns, units = txn_units(e, net)
+            txns, units = txn_units(e, net, day)
             gross, disc, ret = gross_discount_return(e, day, net)
             posted = iso + "T06:30:00" + TZ_SUFFIX
             sales_rows.append((iso, eid, net, txns, units, demand, shipped,
@@ -1208,6 +1252,7 @@ def assert_all(conn, cal):
     """Every planted storyline and every reconciliation rule, checked against
     the database that was just written."""
     from flash import catalog, omni, customer, merch     # noqa: E402
+    from flash.focus import build_exceptions             # noqa: E402
     A = Assertions()
     cur = conn.cursor()
 
@@ -1495,6 +1540,74 @@ def assert_all(conn, cal):
               "sequential attribution telescopes exactly)"
               % (tree["residual_interaction"], CONV_STORE, day),
               "check kpi_tree()'s sequential decomposition")
+
+    # -- 22 attach-rate winner: the basket lever, not the footfall lever ---
+    def _win(eid, start, end):
+        return q("""SELECT SUM(s.net_sales), SUM(s.transactions), SUM(s.units),
+                           SUM(t.traffic)
+                    FROM sales_day s LEFT JOIN traffic_day t
+                      ON t.date=s.date AND t.entity_id=s.entity_id
+                    WHERE s.entity_id=? AND s.date BETWEEN ? AND ?""",
+                 (eid, start.isoformat(), end.isoformat()))[0]
+
+    ty = _win(ATTACH_STORE, ATTACH_START, day)
+    ly = _win(ATTACH_STORE, ATTACH_START - dt.timedelta(days=364),
+              day - dt.timedelta(days=364))
+    sales_r = ty[0] / ly[0]
+    traffic_r = ty[3] / float(ly[3])
+    conv_r = (ty[1] / float(ty[3])) / (ly[1] / float(ly[3]))
+    upt_r = (ty[2] / float(ty[1])) / (ly[2] / float(ly[1]))
+    A.require("STORYLINE 22 'attach-rate winner'",
+              sales_r > 1.05 and 0.95 <= traffic_r <= 1.05
+              and 0.97 <= conv_r <= 1.03 and upt_r >= 1.10,
+              "%s over %s..%s: sales %+.1f%%, traffic %+.1f%%, conversion "
+              "%+.1f%%, UPT %+.1f%% (want sales up, traffic and conversion "
+              "flat, UPT up at least 10%% — the basket lever, not the footfall "
+              "lever)" % (ATTACH_STORE, ATTACH_START, day, (sales_r - 1) * 100,
+                          (traffic_r - 1) * 100, (conv_r - 1) * 100,
+                          (upt_r - 1) * 100),
+              "ATTACH_SALES_MULT and ATTACH_AOV_MULT must stay equal so "
+              "transactions hold flat; raise ATTACH_UPT_MULT for a bigger "
+              "basket move")
+
+    t22 = da.kpi_tree(ATTACH_STORE, day)
+    c22 = dict((x["driver"], x["contribution"]) for x in t22["drivers"])
+    s22 = dict((x["driver"], x["contribution"]) for x in t22["ast_split"])
+    A.require("STORYLINE 22b 'the tree names the basket as the cause'",
+              t22["available"] and t22["gap"] > 0 and c22["ast"] > 0
+              and c22["ast"] > abs(c22["traffic"]) + abs(c22["conversion"])
+              and s22["upt"] > 0 and s22["upt"] > abs(s22["aus"]),
+              "%s tree on %s: gap %+.2f = traffic %+.2f + conversion %+.2f + "
+              "AST %+.2f, and AST splits into AUS %+.2f + UPT %+.2f (want a "
+              "positive gap carried by AST, and AST carried by UPT)"
+              % (ATTACH_STORE, day, t22["gap"], c22["traffic"],
+                 c22["conversion"], c22["ast"], s22["aus"], s22["upt"]),
+              "raise ATTACH_UPT_MULT, or lower the sales/AOV pair so the "
+              "volume drivers stay quiet")
+
+    movers = da.upt_movers(day)
+    A.require("STORYLINE 22c 'it leads the UPT movers leaderboard'",
+              movers["top"] and movers["top"][0]["entity_id"] == ATTACH_STORE
+              and movers["top"][0]["upt_pct"] >= movers["top"][1]["upt_pct"] * 2,
+              "UPT movers leader is %s at %+.1f%%; runner-up %s at %+.1f%% "
+              "(want %s clear by 2x)"
+              % (movers["top"][0]["entity_id"], movers["top"][0]["upt_pct"] * 100,
+                 movers["top"][1]["entity_id"], movers["top"][1]["upt_pct"] * 100,
+                 ATTACH_STORE),
+              "raise ATTACH_UPT_MULT in seed.py")
+
+    upt_exc = [e for e in build_exceptions(da, day, omni, customer, merch)
+               if e["kind"] == "upt"]
+    A.require("STORYLINE 22d 'the UPT exception fires, and only for it'",
+              len(upt_exc) == 1 and upt_exc[0]["entities"] == [ATTACH_STORE]
+              and upt_exc[0]["severity"] == "favourable",
+              "%d UPT exceptions fired: %s (want exactly one, favourable, for "
+              "%s — a threshold that fires for half the fleet is not a "
+              "threshold)" % (len(upt_exc),
+                              [(e["entities"], e["severity"]) for e in upt_exc],
+                              ATTACH_STORE),
+              "raise THRESHOLDS['upt_vs_baseline_pct'] in flash/catalog.py, or "
+              "lower UPT_DAILY_NOISE in seed.py")
 
     # =====================================================================
     # Reconciliation rules

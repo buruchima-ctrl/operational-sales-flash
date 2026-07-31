@@ -506,6 +506,74 @@ class DisplayedColumnsAddUpCase(unittest.TestCase):
                 self.assertAlmostEqual(sum(parts), total, places=2)
 
 
+class UptSurfaceCase(unittest.TestCase):
+    """UPT vs LY has to appear wherever UPT appears, on every surface."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.dir = dbfixture.site_dir()
+        cls.obj = dbfixture.site_objects()[-1]
+        cls.date = cls.obj["date"]
+
+    def _page(self, rel):
+        return _read(os.path.join(self.dir, rel))
+
+    def test_upt_vs_ly_appears_on_every_persona_page(self):
+        s = self.obj["display"]["upt_vs_ly"]
+        for rel in ("day/%s.html", "corporate/%s.html", "field/%s.html",
+                    "email/%s.html"):
+            txt = self._page(rel % self.date)
+            self.assertIn("UPT", txt, rel)
+            self.assertIn(s, txt, "%s omits the fleet UPT vs LY" % rel)
+
+    def test_upt_vs_ly_appears_on_a_store_page(self):
+        from flash import fmt
+        eid = seed.ATTACH_STORE
+        b = self.obj["stores"][eid]["headline"]
+        txt = self._page("store/%s/%s.html" % (eid, self.date))
+        self.assertIn(fmt.ratio(b["upt"]), txt)
+        self.assertIn(fmt.pct(b["upt_pct_vs_ly"]), txt)
+
+    def test_the_upt_rank_page_exists_and_carries_the_movers_table(self):
+        txt = self._page("rank/upt/%s.html" % self.date)
+        self.assertIn("Biggest UPT movers vs LY", txt)
+        self.assertIn("Doors losing basket", txt)
+        self.assertIn(self.obj["upt_movers"]["top"][0]["name"], txt)
+
+    def test_upt_appears_in_the_extract_csv_and_matches_the_page(self):
+        from flash import fmt
+        with open(os.path.join(self.dir, "extracts",
+                               "%s-doors.csv" % self.date), encoding="utf-8") as fh:
+            rows = list(csv.DictReader(fh))
+        self.assertIn("upt_vs_ly", rows[0])
+        eid = seed.ATTACH_STORE
+        row = next(r for r in rows if r["entity_id"] == eid)
+        b = self.obj["stores"][eid]["headline"]
+        self.assertAlmostEqual(float(row["upt"]), b["upt"], places=6)
+        self.assertAlmostEqual(float(row["upt_vs_ly"]), b["upt_pct_vs_ly"],
+                               places=6)
+        page = self._page("store/%s/%s.html" % (eid, self.date))
+        self.assertIn(fmt.pct(b["upt_pct_vs_ly"]), page)
+
+    def test_storyline_22_surfaces_as_a_favourable_exception(self):
+        txt = self._page("day/%s.html" % self.date)
+        exc = [e for e in self.obj["exceptions"] if e["kind"] == "upt"][0]
+        self.assertIn(exc["title"], txt)
+        self.assertIn("basket building", txt)
+
+    def test_storyline_22_tree_shows_the_upt_contribution_driving_the_gap(self):
+        from flash import fmt
+        t = self.obj["stores"][seed.ATTACH_STORE]["tree"]
+        txt = self._page("store/%s/tree/%s.html" % (seed.ATTACH_STORE, self.date))
+        # The page prints the RECONCILED contributions, so the assertion reads
+        # them the same way — the sub-cent residual lands on the largest row.
+        _c, split_rows = render_site.tree_contributions(t)
+        split = dict((x["driver"], x["contribution"]) for x in split_rows)
+        self.assertIn("AST splits into", txt)
+        self.assertIn(fmt.money_signed_exact(split["upt"]), txt)
+        self.assertGreater(split["upt"], abs(split["aus"]))
+
+
 class PersonaPageCase(unittest.TestCase):
     """BR-18 on the surface: the same figure, wherever it appears."""
 

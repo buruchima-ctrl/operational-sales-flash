@@ -53,7 +53,7 @@ PERSONA_SCOPE = {
 RANK_LABELS = {
     "net_sales": "Net sales", "comp_pct": "Comp %", "conversion": "Conversion",
     "plan_attainment": "Plan attainment", "traffic": "Traffic",
-    "transactions": "Transactions", "ast": "AST",
+    "transactions": "Transactions", "ast": "AST", "upt": "UPT",
 }
 
 OMNI_TITLES = {
@@ -468,11 +468,14 @@ def _kpi_row(d: Dict[str, object], obj) -> str:
               _num_class(h["plan_attainment"], pivot=1.0), d["plan_gap"],
               "reported actual ÷ plan, day grain (BR-19)"),
         _tile("Transactions", d["transactions"], "", d["txn_comp"] + " vs LY"),
-        _tile("AST", d["ast"], "", "avg sale per transaction (= AOV)",
-              "net sales ÷ transactions"),
-        _tile("AUS", d["aus"], "", "avg unit sale (= AUR)",
-              "net sales ÷ units"),
-        _tile("UPT", d["upt"], "", "units per transaction"),
+        _tile("AST", d["ast"], _num_class(h["ast_pct_vs_ly"]),
+              d["ast_vs_ly"] + " vs LY · = AOV", "net sales ÷ transactions"),
+        _tile("AUS", d["aus"], _num_class(h["aus_pct_vs_ly"]),
+              d["aus_vs_ly"] + " vs LY · = AUR", "net sales ÷ units"),
+        _tile("UPT", d["upt"], _num_class(h["upt_pct_vs_ly"]),
+              d["upt_vs_ly"] + " vs LY · LY " + d["ly_upt"],
+              "units ÷ transactions, on the comp entity set — the basket "
+              "lever a door can actually move"),
         _tile("Traffic", d["traffic"], _num_class(h["traffic_pct_vs_ly"]),
               d["traffic_pct"] + " vs LY", "store door counts; FSS only"),
         _tile("Conversion", d["conversion"],
@@ -874,13 +877,15 @@ def _day_windows(d) -> str:
         w = d["windows"][k]
         rows.append((w["label"], w["range"], w["net_sales"], w["comp_pct"],
                      w["plan_attainment"], w["conversion"], w["conversion_bps"],
-                     w["pct_new_to_file"]))
+                     w["upt"], w["upt_vs_ly"], w["pct_new_to_file"]))
     return _table(["Window", "Range", "Net sales", "Comp", "Plan", "Conversion",
-                   "vs LY", "New-to-file"], rows,
+                   "vs LY", "UPT", "vs LY", "New-to-file"], rows,
                   titles=[None, None, "Σ net sales over the window's days",
                           "each day against its own aligned LY date",
                           "day-grain plan only", "Σ transactions ÷ Σ traffic",
-                          "basis points", "new buyers ÷ total buyers"])
+                          "basis points", "Σ units ÷ Σ transactions, never an "
+                          "average of daily ratios", "the basket lever",
+                          "new buyers ÷ total buyers"])
 
 
 def _day_slices(obj, d, depth) -> str:
@@ -902,10 +907,12 @@ def _day_slices(obj, d, depth) -> str:
             first = _link(depth, href, r["label"]) if href else r["label"]
             rows.append((first, r["coverage"], r["net_sales"], r["comp_pct"],
                          r["plan_attainment"], r["plan_grain_mix"],
-                         r["conversion"], r["conversion_bps"]))
+                         r["conversion"], r["conversion_bps"],
+                         r["upt"], r["upt_vs_ly"]))
         o.append("<h3>%s</h3>" % esc(heading))
         o.append(_table([heading, "Posted", "Net sales", "Comp", "Plan",
-                         "Plan grain", "Conversion", "vs LY"], rows))
+                         "Plan grain", "Conversion", "vs LY", "UPT",
+                         "vs LY"], rows))
     o.append(_recon("Brand + e-commerce, affiliate, region and district each "
                     "sum to the same %s headline (BR-11)." % d["net_sales"]))
     return "".join(o)
@@ -1101,9 +1108,12 @@ def _persona_kpi_row(p) -> str:
         _tile("Plan attainment", d["plan_attainment"],
               _num_class(h["plan_attainment"], pivot=1.0), d["plan_gap"]),
         _tile("Transactions", d["transactions"], "", d["txn_comp"] + " vs LY"),
-        _tile("AST", d["ast"], "", "= AOV"),
-        _tile("AUS", d["aus"], "", "= AUR"),
-        _tile("UPT", d["upt"], ""),
+        _tile("AST", d["ast"], _num_class(h["ast_pct_vs_ly"]),
+              d["ast_vs_ly"] + " vs LY · = AOV"),
+        _tile("AUS", d["aus"], _num_class(h["aus_pct_vs_ly"]),
+              d["aus_vs_ly"] + " vs LY · = AUR"),
+        _tile("UPT", d["upt"], _num_class(h["upt_pct_vs_ly"]),
+              d["upt_vs_ly"] + " vs LY"),
         _tile("Traffic", d["traffic"], _num_class(h["traffic_pct_vs_ly"]),
               d["traffic_pct"] + " vs LY"),
         _tile("Conversion", d["conversion"], _num_class(h["conversion_bps_vs_ly"]),
@@ -1153,10 +1163,12 @@ def _rollup_table(p_key: str, dim: str, rows, date_iso: str, depth: int) -> str:
             "/".join(r["plan_grain_mix"]) or "no plan",
             fmt.pct_plain(r["conversion"], 2),
             _bps_str(r["conversion_bps_vs_ly"]),
+            fmt.ratio(r["upt"]),
+            fmt.pct(r["upt_pct_vs_ly"]),
         ))
     out.append(_table([ROLLUP_HEADINGS[dim], "Posted", "Net sales", "% to LY",
-                       "% to plan", "Plan grain", "Conversion", "vs LY"],
-                      table_rows))
+                       "% to plan", "Plan grain", "Conversion", "vs LY",
+                       "UPT", "vs LY"], table_rows))
     return "".join(out)
 
 
@@ -1381,9 +1393,10 @@ def render_district(obj, district_id: str, nav) -> str:
                      fmt.pct_plain(s["plan_attainment"]),
                      "/".join(s["plan_grain_mix"]) or "no plan",
                      fmt.pct_plain(s["conversion"], 2),
-                     _bps_str(s["conversion_bps_vs_ly"])))
+                     _bps_str(s["conversion_bps_vs_ly"]),
+                     fmt.ratio(s["upt"]), fmt.pct(s["upt_pct_vs_ly"])))
     o.append(_table(["Door", "Posted", "Net sales", "% to LY", "% to plan",
-                     "Plan grain", "Conversion", "vs LY"], rows))
+                     "Plan grain", "Conversion", "vs LY", "UPT", "vs LY"], rows))
     o.append(_recon("Doors sum to %s, this district's total (BR-11)."
                     % fmt.money_exact(row["net_sales"])))
     o.append(_legend())
@@ -1426,9 +1439,12 @@ def render_store(obj, entity_id: str, nav) -> str:
               _num_class(h["plan_attainment"], pivot=1.0),
               "grain: %s" % b["plan_grain"].lower()),
         _tile("Transactions", hd["transactions"], "", hd["txn_comp"] + " vs LY"),
-        _tile("AST", hd["ast"], "", "= AOV"),
-        _tile("AUS", hd["aus"], "", "= AUR"),
-        _tile("UPT", hd["upt"], ""),
+        _tile("AST", hd["ast"], _num_class(h["ast_pct_vs_ly"]),
+              hd["ast_vs_ly"] + " vs LY · = AOV"),
+        _tile("AUS", hd["aus"], _num_class(h["aus_pct_vs_ly"]),
+              hd["aus_vs_ly"] + " vs LY · = AUR"),
+        _tile("UPT", hd["upt"], _num_class(h["upt_pct_vs_ly"]),
+              hd["upt_vs_ly"] + " vs LY · LY " + hd["ly_upt"]),
         _tile("Traffic", hd["traffic"], _num_class(h["traffic_pct_vs_ly"]),
               hd["traffic_pct"] + " vs LY"),
         _tile("Conversion", hd["conversion"], _num_class(h["conversion_bps_vs_ly"]),
@@ -1465,9 +1481,10 @@ def render_store(obj, entity_id: str, nav) -> str:
                       fmt.money_compact(w["net_sales"]), fmt.pct(w["comp_pct"]),
                       fmt.pct_plain(w["plan_attainment"]),
                       fmt.pct_plain(w["conversion"], 2),
-                      _bps_str(w["conversion_bps_vs_ly"])))
+                      _bps_str(w["conversion_bps_vs_ly"]),
+                      fmt.ratio(w["upt"]), fmt.pct(w["upt_pct_vs_ly"])))
     o.append(_table(["Window", "Range", "Net sales", "Comp", "Plan",
-                     "Conversion", "vs LY"], wrows))
+                     "Conversion", "vs LY", "UPT", "vs LY"], wrows))
 
     o.append("<h2>Merchandise at this door</h2>")
     o.append(_store_categories(obj, b, depth))
@@ -1501,6 +1518,10 @@ def _store_display(b) -> Dict[str, str]:
         "txn_comp": fmt.pct(h["comp_transactions"]["pct"]),
         "ast": fmt.money_plain(h["ast"]), "aus": fmt.money_plain(h["aus"]),
         "upt": fmt.ratio(h["upt"]),
+        "ast_vs_ly": fmt.pct(h["ast_pct_vs_ly"]),
+        "aus_vs_ly": fmt.pct(h["aus_pct_vs_ly"]),
+        "upt_vs_ly": fmt.pct(h["upt_pct_vs_ly"]),
+        "ly_upt": fmt.ratio(h["ly_upt"]),
         "traffic": fmt.count(h["traffic"]),
         "traffic_pct": fmt.pct(h["traffic_pct_vs_ly"]),
         "conversion": (fmt.pct_plain(h["conversion"], 2)
@@ -2292,6 +2313,8 @@ def render_rank(obj, kpi: str, nav) -> str:
             return fmt.pct(v)
         if kpi in ("plan_attainment", "conversion"):
             return fmt.pct_plain(v, 2)
+        if kpi == "upt":
+            return fmt.ratio(v)
         return fmt.count(v)
 
     def rows_for(items):
@@ -2306,6 +2329,29 @@ def render_rank(obj, kpi: str, nav) -> str:
     o.append("<h2>Bottom 10</h2>")
     o.append(_table(["Door", "Brand", "Region", "District", "Affiliate",
                      RANK_LABELS[kpi]], rows_for(r["bottom"])))
+    if kpi == "upt" and obj.get("upt_movers"):
+        o.append("<h2>Biggest UPT movers vs LY — the basket lever</h2>")
+        o.append('<p class="key">The table above ranks the LEVEL. This one '
+                 'ranks the MOVE, which is the one a field leader can act on: '
+                 'a door with a naturally big assortment will always sit high '
+                 'on level and tell you nothing.</p>')
+        mv = obj["upt_movers"]
+
+        def mrows(items):
+            return [(_link(depth, "store/%s/%s.html" % (x["entity_id"],
+                                                        obj["date"]), x["name"]),
+                     x["region"], fmt.ratio(x["upt"]), fmt.ratio(x["ly_upt"]),
+                     fmt.pct(x["upt_pct"]), fmt.pct(x["ast_pct"]),
+                     fmt.pct(x["aus_pct"])) for x in items]
+
+        head = ["Door", "Region", "UPT", "LY UPT", "UPT vs LY", "AST vs LY",
+                "AUS vs LY"]
+        o.append(_table(head, mrows(mv["top"])))
+        o.append("<h3>Doors losing basket</h3>")
+        o.append(_table(head, mrows(mv["bottom"])))
+        o.append(_recon("Comp basis, day-aligned LY. A door outside the comp "
+                        "set has no like-for-like basket to move against and "
+                        "is listed as unavailable rather than ranked."))
     if r["unavailable"]:
         o.append("<h2>Not ranked — the KPI is unavailable for these doors</h2>")
         o.append(_table(["Door", "Brand", "Region", "District", "Affiliate",

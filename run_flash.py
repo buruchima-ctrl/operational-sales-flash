@@ -156,6 +156,16 @@ def storyline_index():
          "where": "store/%s/tree/%s.html — contributions and the calculator"
                   % (seed.CONV_STORE, a),
          "href": "store/%s/tree/%s.html" % (seed.CONV_STORE, a)},
+        {"n": 22, "rule": "BR-20", "title": "Attach-rate winner — the basket lever",
+         "note": "The mirror image of storyline 9. Harborlight Galleria grew "
+                 "sales with traffic flat and conversion steady, by selling "
+                 "more units per transaction. The UPT exception fires "
+                 "favourably, the door leads the UPT movers table, and its KPI "
+                 "tree shows AST carrying a positive gap with UPT — not AUS — "
+                 "underneath it.",
+         "where": "store/%s/tree/%s.html — the AST split, and rank/upt/%s.html"
+                  % (seed.ATTACH_STORE, a, a),
+         "href": "store/%s/tree/%s.html" % (seed.ATTACH_STORE, a)},
         {"n": 15, "rule": "BR-7", "title": "Restatement — version 2",
          "note": "2026-07-20 was re-issued on the settled basis with a reason "
                  "string. Version 1 is preserved byte for byte at its own URL.",

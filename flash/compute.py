@@ -55,7 +55,7 @@ WINDOW_LABELS = {"LW": "Last week", "WTD": "Week to date",
                  "YTD": "Year to date"}
 OMNI_PANELS = ("BOPIS", "RTD", "OOFIS", "CR", "BORIS")
 RANK_KPIS = ("net_sales", "comp_pct", "conversion", "plan_attainment",
-             "traffic", "transactions", "ast")
+             "traffic", "transactions", "ast", "upt")
 MAX_NARRATIVE_SENTENCES = 4
 
 
@@ -136,6 +136,7 @@ def build_flash(da, day: D, as_of: Optional[D] = None, version: int = 1,
         obj["drill"] = _drill(da, day, ly_override)
         obj["stores"] = _store_blocks(da, day)
         obj["ranks"] = {k: da.rank_stores(day, kpi=k, n=10) for k in RANK_KPIS}
+        obj["upt_movers"] = da.upt_movers(day, n=10)
         obj["extract"] = _extract_rows(da, day, obj)
 
     obj["disclosures"] = _disclosures(da, day, obj)
@@ -250,6 +251,7 @@ def _headline(da, day: D, comp: Dict[str, object], **scope) -> Dict[str, object]
     ly_override = (D.fromisoformat(comp["ly_date"])
                    if comp and comp.get("override_in_effect") else None)
     basket = da.basket(day, **scope)
+    cbasket = da.comp_basket(day, ly_override=ly_override, **scope)
     plan = da.plan_pair(day, **scope)
     txn = da.comp_transactions(day, ly_override=ly_override, **scope)
     conv = da.conversion(day, **scope)
@@ -270,6 +272,15 @@ def _headline(da, day: D, comp: Dict[str, object], **scope) -> Dict[str, object]
         "units": basket["units"],
         "ast": basket["ast"], "aus": basket["aus"], "upt": basket["upt"],
         "aov": basket["aov"], "aur": basket["aur"],
+        # The basket is a lever, so it carries a movement. Showing UPT with no
+        # comparison makes a thing you can change look like a thing you have.
+        "ast_pct_vs_ly": cbasket["ast_pct"],
+        "aus_pct_vs_ly": cbasket["aus_pct"],
+        "upt_pct_vs_ly": cbasket["upt_pct"],
+        "ly_ast": cbasket["ly_ast"], "ly_aus": cbasket["ly_aus"],
+        "ly_upt": cbasket["ly_upt"],
+        "units_pct_vs_ly": cbasket["units_pct"],
+        "comp_basket_members": cbasket["members"],
         "comp_transactions": txn,
         "traffic": trf["traffic"],
         "traffic_pct_vs_ly": trf["pct_vs_ly"],
@@ -308,6 +319,12 @@ def _window(da, day: D, window: str, **scope) -> Dict[str, object]:
     m["ly_conversion"] = c["ly_conversion"]
     m["conversion_bps_vs_ly"] = c["bps_vs_ly"]
     m["traffic"] = c["traffic"]
+    bw = da.basket_window(day, window, **scope)
+    m["upt"] = bw["upt"]
+    m["ly_upt"] = bw["ly_upt"]
+    m["upt_pct_vs_ly"] = bw["upt_pct_vs_ly"]
+    m["ast"] = bw["ast"]
+    m["aus"] = bw["aus"]
     b = customer_mod.buyers_window(da, day, window, **scope)
     m["new_buyers"] = b["new_buyers"]
     m["total_buyers"] = b["total_buyers"]
@@ -357,6 +374,7 @@ def _slice(da, day: D, ly_override, kw: dict, label: str, key: str,
     open_ids = [e["entity_id"] for e in scope_entities if da.is_open_on(e, day)]
     reported = [e for e in open_ids if da.sales_row(e, day) is not None]
     conv = da.conversion(day, **kw)
+    cb = da.comp_basket(day, ly_override=ly_override, **kw)
     return {
         "key": key, "label": label, "region": region,
         "currencies": da.currencies_in_scope(**kw),
@@ -372,6 +390,8 @@ def _slice(da, day: D, ly_override, kw: dict, label: str, key: str,
         "conversion": conv["conversion"],
         "conversion_bps_vs_ly": conv["bps_vs_ly"],
         "traffic": conv["traffic"] or None,
+        "upt": cb["upt"], "ly_upt": cb["ly_upt"],
+        "upt_pct_vs_ly": cb["upt_pct"], "ast_pct_vs_ly": cb["ast_pct"],
         "entity_ids": sorted(e["entity_id"] for e in scope_entities),
     }
 
@@ -695,6 +715,10 @@ def _display_kpis(h) -> Dict[str, str]:
         "units": fmt.count(h["units"]),
         "ast": fmt.money_plain(h["ast"]), "aus": fmt.money_plain(h["aus"]),
         "upt": fmt.ratio(h["upt"]),
+        "ast_vs_ly": fmt.pct(h["ast_pct_vs_ly"]),
+        "aus_vs_ly": fmt.pct(h["aus_pct_vs_ly"]),
+        "upt_vs_ly": fmt.pct(h["upt_pct_vs_ly"]),
+        "ly_upt": fmt.ratio(h["ly_upt"]),
         "traffic": fmt.count(h["traffic"]),
         "traffic_pct": fmt.pct(h["traffic_pct_vs_ly"]),
         "conversion": (fmt.pct_plain(h["conversion"], 2)
@@ -797,7 +821,8 @@ EXTRACT_COLUMNS = (
     "comp_eligible", "plan_grain", "net_sales_local", "net_sales_usd",
     "gross_sales_usd", "discounts_usd", "returns_usd", "comp_pct",
     "plan_usd", "plan_attainment", "transactions", "units", "ast_usd",
-    "aus_usd", "upt", "traffic", "conversion", "new_customers",
+    "aus_usd", "upt", "upt_vs_ly", "ast_vs_ly", "aus_vs_ly",
+    "traffic", "conversion", "new_customers",
     "new_customer_sales_usd", "omni_penetration",
 )
 
@@ -829,6 +854,8 @@ def _extract_rows(da, day: D, obj) -> Dict[str, object]:
             "plan_attainment": h["plan_attainment"],
             "transactions": h["transactions"], "units": h["units"],
             "ast_usd": h["ast"], "aus_usd": h["aus"], "upt": h["upt"],
+            "upt_vs_ly": h["upt_pct_vs_ly"], "ast_vs_ly": h["ast_pct_vs_ly"],
+            "aus_vs_ly": h["aus_pct_vs_ly"],
             "traffic": h["traffic"], "conversion": h["conversion"],
             "new_customers": h["new_customers"],
             "new_customer_sales_usd": h["new_customer_sales"],
@@ -1080,8 +1107,13 @@ def _display(obj) -> Dict[str, object]:
         "txn_comp": fmt.pct(h["comp_transactions"]["pct"]),
         "units": fmt.count(h["units"]),
         "ast": fmt.money_plain(h["ast"]),
+        "ast_vs_ly": fmt.pct(h["ast_pct_vs_ly"]),
         "aus": fmt.money_plain(h["aus"]),
+        "aus_vs_ly": fmt.pct(h["aus_pct_vs_ly"]),
         "upt": fmt.ratio(h["upt"]),
+        "upt_vs_ly": fmt.pct(h["upt_pct_vs_ly"]),
+        "ly_upt": fmt.ratio(h["ly_upt"]),
+        "units_vs_ly": fmt.pct(h["units_pct_vs_ly"]),
         "traffic": fmt.count(h["traffic"]),
         "traffic_pct": fmt.pct(h["traffic_pct_vs_ly"]),
         "conversion": (fmt.pct_plain(h["conversion"], 2)
@@ -1138,6 +1170,9 @@ def _display(obj) -> Dict[str, object]:
             "transactions": fmt.count(w["transactions"]),
             "conversion": fmt.pct_plain(w["conversion"], 2),
             "conversion_bps": _bps(w["conversion_bps_vs_ly"]),
+            "upt": fmt.ratio(w["upt"]),
+            "upt_vs_ly": fmt.pct(w["upt_pct_vs_ly"]),
+            "ast": fmt.money_plain(w["ast"]),
             "traffic": fmt.count(w["traffic"]),
             "new_buyers": fmt.count(w["new_buyers"]),
             "pct_new_to_file": fmt.pct_plain(w["pct_new_to_file"]),
@@ -1223,6 +1258,8 @@ def _display_slice(r) -> Dict[str, object]:
         "plan_grain_mix": "/".join(r["plan_grain_mix"]) or "no plan",
         "conversion": fmt.pct_plain(r["conversion"], 2),
         "conversion_bps": _bps(r["conversion_bps_vs_ly"]),
+        "upt": fmt.ratio(r["upt"]),
+        "upt_vs_ly": fmt.pct(r["upt_pct_vs_ly"]),
         "traffic": fmt.count(r["traffic"]),
         "coverage": "%d/%d" % (r["reported_entities"], r["open_entities"]),
         "adverse": (r["comp_pct"] or 0) < 0,

@@ -60,6 +60,12 @@ THRESHOLDS = {
     "category_vs_fleet_pts": 0.03,    # category comp < fleet comp − 3pts
     "ntf_below_baseline_pts": 0.05,   # new-to-file < baseline − 5pts WTD
     "conversion_below_baseline_bp": 150,
+    # UPT is a ratio of counts, not a percentage of visits, so a basis-point
+    # threshold would be meaningless. It takes the omni family's shape instead:
+    # a percentage move against the door's own trailing baseline, in either
+    # direction — below it is a coaching signal, above it is an attach-rate
+    # winner worth naming.
+    "upt_vs_baseline_pct": 0.05,
     "fav_unfav_band": 0.05,           # ±5% fav / within / unfav key
 }
 
@@ -605,6 +611,81 @@ class DataAccess(object):
                           "(BRD §4.9 field terminology).",
         }
 
+    def comp_basket(self, day: D, ly_override: Optional[D] = None,
+                    **scope) -> Dict[str, object]:
+        """#8/#9/#10 against the day-aligned LY, on the COMP basis.
+
+        The headline row showed AST, AUS and UPT with no comparison, which
+        makes a lever look like a fact. Comparing them needs the comp entity
+        set — the same one the sales comp uses — because a basket average over
+        a different set of doors is a different average, not a movement."""
+        ly_day = ly_override or self.ly_date(day)
+        members = self.comp_set(day, ly_override, **scope)
+        ty_net = ly_net = 0.0
+        ty_txn = ly_txn = ty_un = ly_un = 0
+        for m in members:
+            ty_net += self.net_sales_of(m, day)
+            ly_net += self.net_sales_of(m, ly_day)
+            a_ = self.sales_row(m, day)
+            b_ = self.sales_row(m, ly_day)
+            ty_txn += a_["transactions"]
+            ly_txn += b_["transactions"]
+            ty_un += a_["units"]
+            ly_un += b_["units"]
+
+        def ratio(num, den):
+            return (num / float(den)) if den else None
+
+        def pct(a_, b_):
+            return (a_ / b_ - 1.0) if (a_ is not None and b_) else None
+
+        ty_ast, ly_ast = ratio(ty_net, ty_txn), ratio(ly_net, ly_txn)
+        ty_aus, ly_aus = ratio(ty_net, ty_un), ratio(ly_net, ly_un)
+        ty_upt, ly_upt = ratio(ty_un, ty_txn), ratio(ly_un, ly_txn)
+        return {
+            "members": len(members), "ly_date": ly_day.isoformat(),
+            "ty_transactions": ty_txn, "ly_transactions": ly_txn,
+            "ty_units": ty_un, "ly_units": ly_un,
+            "ast": ty_ast, "ly_ast": ly_ast, "ast_pct": pct(ty_ast, ly_ast),
+            "aus": ty_aus, "ly_aus": ly_aus, "aus_pct": pct(ty_aus, ly_aus),
+            "upt": ty_upt, "ly_upt": ly_upt, "upt_pct": pct(ty_upt, ly_upt),
+            "units_pct": pct(float(ty_un), float(ly_un)),
+            "basis": "comp entity set, day-aligned LY",
+        }
+
+    def basket_window(self, day: D, window: str, **scope) -> Dict[str, object]:
+        """AST / AUS / UPT over a fiscal window, aggregated as Σ ÷ Σ.
+
+        Never an average of daily ratios: a mean of UPTs weights a quiet
+        Tuesday the same as a Saturday and answers a question nobody asked."""
+        ty_net = ly_net = 0.0
+        ty_txn = ly_txn = ty_un = ly_un = 0
+        for d in self.window_dates(day, window):
+            ids = self.scope_ids(**scope)
+            ty_net += self.net_sales(d, **scope)
+            ty_txn += self._sum_col("transactions", d, ids)
+            ty_un += self._sum_col("units", d, ids)
+            ld = self.ly_date(d)
+            ly_net += self.net_sales(ld, **scope)
+            ly_txn += self._sum_col("transactions", ld, ids)
+            ly_un += self._sum_col("units", ld, ids)
+
+        def ratio(num, den):
+            return (num / float(den)) if den else None
+
+        ty_upt, ly_upt = ratio(ty_un, ty_txn), ratio(ly_un, ly_txn)
+        return {
+            "window": window, "end": day.isoformat(),
+            "transactions": ty_txn, "units": ty_un,
+            "ast": ratio(ty_net, ty_txn), "aus": ratio(ty_net, ty_un),
+            "upt": ty_upt,
+            "ly_transactions": ly_txn, "ly_units": ly_un,
+            "ly_ast": ratio(ly_net, ly_txn), "ly_aus": ratio(ly_net, ly_un),
+            "ly_upt": ly_upt,
+            "upt_pct_vs_ly": ((ty_upt / ly_upt - 1.0)
+                              if (ty_upt is not None and ly_upt) else None),
+        }
+
     # =====================================================================
     # Plan at each brand's native grain (#3, D12, BR-19)
     # =====================================================================
@@ -1074,7 +1155,7 @@ class DataAccess(object):
     # =====================================================================
 
     RANK_KPIS = ("net_sales", "comp_pct", "conversion", "plan_attainment",
-                 "traffic", "transactions", "ast")
+                 "traffic", "transactions", "ast", "upt")
 
     def rank_stores(self, day: D, kpi: str = "net_sales", n: int = 10,
                     **scope) -> Dict[str, List[dict]]:
@@ -1101,6 +1182,36 @@ class DataAccess(object):
         return {"kpi": kpi, "top": rows[:n], "bottom": list(reversed(rows[-n:])),
                 "unavailable": unavailable, "ranked": len(rows)}
 
+    def upt_movers(self, day: D, n: int = 10, **scope) -> Dict[str, object]:
+        """Doors ranked by how far UPT has MOVED against the aligned LY day,
+        not by how high it sits.
+
+        A level table rewards doors whose assortment naturally carries a big
+        basket. A movement table names the doors that changed, which is the one
+        a field leader can act on — and the only one on which an attach-rate
+        story can win."""
+        rows, unavailable = [], []
+        for e in self._scope_entities(**scope):
+            eid = e["entity_id"]
+            if e["channel"] != "STORE" or self.sales_row(eid, day) is None:
+                continue
+            cb = self.comp_basket(day, entity_id=eid)
+            rec = {"entity_id": eid, "name": e["name"], "region": e["region"],
+                   "brand_id": e["brand_id"], "district_id": e["district_id"],
+                   "affiliate_id": e["affiliate_id"],
+                   "upt": cb["upt"], "ly_upt": cb["ly_upt"],
+                   "upt_pct": cb["upt_pct"], "ast_pct": cb["ast_pct"],
+                   "aus_pct": cb["aus_pct"],
+                   "transactions": cb["ty_transactions"],
+                   "units": cb["ty_units"]}
+            (rows if cb["upt_pct"] is not None else unavailable).append(rec)
+        rows.sort(key=lambda r: (-r["upt_pct"], r["entity_id"]))
+        unavailable.sort(key=lambda r: r["entity_id"])
+        return {"top": rows[:n], "bottom": list(reversed(rows[-n:])),
+                "unavailable": unavailable, "ranked": len(rows),
+                "basis": "comp basis, day-aligned LY; a door outside the comp "
+                         "set has no like-for-like basket to move against"}
+
     def _kpi_value(self, eid, day, kpi):
         if kpi == "net_sales":
             return self.net_sales_of(eid, day)
@@ -1116,6 +1227,8 @@ class DataAccess(object):
         if kpi == "transactions":
             row = self.sales_row(eid, day)
             return float(row["transactions"]) if row else None
+        if kpi == "upt":
+            return self.basket(day, entity_id=eid)["upt"]
         return self.basket(day, entity_id=eid)["ast"]
 
     # =====================================================================

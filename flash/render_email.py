@@ -246,9 +246,9 @@ def _kpis(a, obj, d):
     _section(a, "KPI row")
     rows = [
         ("Transactions", d["transactions"], d["txn_comp"]),
-        ("AST — avg sale per transaction", d["ast"], ""),
-        ("AUS — avg unit sale", d["aus"], ""),
-        ("UPT — units per transaction", d["upt"], ""),
+        ("AST — avg sale per transaction", d["ast"], d["ast_vs_ly"]),
+        ("AUS — avg unit sale", d["aus"], d["aus_vs_ly"]),
+        ("UPT — units per transaction", d["upt"], d["upt_vs_ly"]),
         ("Traffic", d["traffic"], d["traffic_pct"]),
         ("Conversion", d["conversion"], d["conversion_bps"]),
         ("New customers", d["new_customers"], d["new_customer_pct"] + " of sales"),

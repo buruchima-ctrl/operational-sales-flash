@@ -360,6 +360,7 @@ def build_exceptions(da, day: D, omni_mod, customer_mod, merch_mod,
     out += _category_exceptions(da, day, merch_mod, **scope)
     out += _ntf_exceptions(da, day, customer_mod, **scope)
     out += _conversion_exceptions(da, day, **scope)
+    out += _upt_exceptions(da, day, **scope)
     out.sort(key=lambda e: (SEVERITY_ORDER.get(e["severity"], 9),
                             e["kind"], e["title"]))
     return out
@@ -491,6 +492,57 @@ def _conversion_exceptions(da, day: D, **scope) -> List[dict]:
             rule="BR-15", value=bp, threshold=-thr_bp, entities=[eid]))
     out.sort(key=lambda x: (x["value"], x["entities"]))
     return out[:5]
+
+
+def _upt_exceptions(da, day: D, **scope) -> List[dict]:
+    """Units per transaction against the door's own trailing baseline, WTD.
+
+    UPT is a lever, not a by-product: a door grows either by pulling more
+    people through the door or by selling them more once they are in. The
+    conversion exception covers the first. This covers the second, and it fires
+    in BOTH directions — below baseline is a coaching signal, above it is an
+    attach-rate winner the field should be copying rather than ignoring."""
+    from flash.catalog import THRESHOLDS
+    thr = THRESHOLDS["upt_vs_baseline_pct"]
+    adverse, favourable = [], []
+    for e in da._scope_entities(**scope):
+        if e["channel"] != "STORE":
+            continue
+        eid = e["entity_id"]
+        cur = da.basket_window(day, "WTD", entity_id=eid)
+        if not cur["upt"]:
+            continue
+        base_un = base_tx = 0
+        for wk in (1, 2, 3, 4):
+            w = da.basket_window(day - dt.timedelta(days=7 * wk), "WTD",
+                                 entity_id=eid)
+            base_un += w["units"]
+            base_tx += w["transactions"]
+        if not base_tx:
+            continue
+        baseline = base_un / float(base_tx)
+        move = cur["upt"] / baseline - 1.0
+        if abs(move) < thr:
+            continue
+        rec = _exc(
+            "upt", "adverse" if move < 0 else "favourable",
+            "%s basket %s to %s units per transaction"
+            % (e["name"], "thinning" if move < 0 else "building",
+               fmt.ratio(cur["upt"])),
+            "WTD UPT %s against a trailing 4-week baseline of %s (%s). AST %s "
+            "on %s transactions. %s"
+            % (fmt.ratio(cur["upt"]), fmt.ratio(baseline), fmt.pct(move),
+               fmt.money_plain(cur["ast"]), fmt.count(cur["transactions"]),
+               "Units per transaction is a lever — this door is losing attach."
+               if move < 0 else
+               "This door is growing sales through the basket, not the door "
+               "count. Worth copying."),
+            href="store/%s/tree/%s.html" % (eid, day.isoformat()),
+            rule="BR-20", value=move, threshold=thr, entities=[eid])
+        (adverse if move < 0 else favourable).append(rec)
+    adverse.sort(key=lambda x: (x["value"], x["entities"]))
+    favourable.sort(key=lambda x: (-x["value"], x["entities"]))
+    return adverse[:5] + favourable[:3]
 
 
 def _channel_label(key: str) -> str:

@@ -199,6 +199,103 @@ class PanelCase(unittest.TestCase):
                                  THRESHOLDS["category_vs_fleet_pts"])
 
 
+class UptLeverCase(unittest.TestCase):
+    """UPT is a lever the field can move, so it carries a comparison, a rank,
+    an exception and a storyline — the same treatment conversion gets."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.da = dbfixture.da()
+        cls.obj = dbfixture.site_objects()[-1]
+
+    def test_headline_carries_upt_against_ly(self):
+        h = self.obj["headline"]
+        for key in ("upt_pct_vs_ly", "ast_pct_vs_ly", "aus_pct_vs_ly",
+                    "ly_upt", "units_pct_vs_ly"):
+            self.assertIn(key, h, key)
+            self.assertIsNotNone(h[key], key)
+
+    def test_upt_vs_ly_is_the_comp_basis_not_the_reported_basis(self):
+        cb = self.da.comp_basket(ANCHOR)
+        self.assertAlmostEqual(self.obj["headline"]["upt_pct_vs_ly"],
+                               cb["upt_pct"], places=12)
+        self.assertEqual(cb["members"], len(self.da.comp_set(ANCHOR)))
+
+    def test_comp_basket_identities_hold(self):
+        cb = self.da.comp_basket(ANCHOR)
+        self.assertAlmostEqual(cb["upt"], cb["ty_units"] / cb["ty_transactions"],
+                               places=12)
+        self.assertAlmostEqual(cb["ast"] / cb["aus"], cb["upt"], places=9)
+        self.assertAlmostEqual(cb["ly_ast"] / cb["ly_aus"], cb["ly_upt"],
+                               places=9)
+
+    def test_window_upt_is_aggregated_not_averaged(self):
+        w = self.da.basket_window(ANCHOR, "WTD")
+        hand_u = hand_t = 0
+        for d in self.da.window_dates(ANCHOR, "WTD"):
+            ids = self.da.scope_ids()
+            hand_u += self.da._sum_col("units", d, ids)
+            hand_t += self.da._sum_col("transactions", d, ids)
+        self.assertAlmostEqual(w["upt"], hand_u / float(hand_t), places=12)
+
+    def test_upt_is_a_selectable_rank_kpi(self):
+        self.assertIn("upt", self.obj["ranks"])
+        top = self.obj["ranks"]["upt"]["top"]
+        self.assertTrue(top)
+        self.assertEqual([r["value"] for r in top],
+                         sorted([r["value"] for r in top], reverse=True))
+
+    def test_upt_movers_rank_the_move_not_the_level(self):
+        mv = self.obj["upt_movers"]
+        self.assertEqual(mv["top"][0]["entity_id"], seed.ATTACH_STORE)
+        self.assertGreater(mv["top"][0]["upt_pct"],
+                           mv["top"][1]["upt_pct"] * 2)
+
+    def test_the_upt_exception_fires_once_and_favourably(self):
+        upt = [e for e in self.obj["exceptions"] if e["kind"] == "upt"]
+        self.assertEqual(len(upt), 1)
+        self.assertEqual(upt[0]["severity"], "favourable")
+        self.assertEqual(upt[0]["entities"], [seed.ATTACH_STORE])
+
+    def test_the_upt_threshold_comes_from_the_catalog(self):
+        from flash.catalog import THRESHOLDS
+        upt = [e for e in self.obj["exceptions"] if e["kind"] == "upt"][0]
+        self.assertEqual(upt["threshold"], THRESHOLDS["upt_vs_baseline_pct"])
+
+    def test_storyline_22_is_the_basket_lever_not_the_footfall_lever(self):
+        eid = seed.ATTACH_STORE
+        b = self.obj["stores"][eid]["headline"]
+        self.assertGreater(b["upt_pct_vs_ly"], 0.10)
+        self.assertGreater(b["ast_pct_vs_ly"], 0.08)
+        self.assertLess(abs(b["conversion_bps_vs_ly"]), 120)
+
+    def test_storyline_22_tree_names_the_basket(self):
+        t = self.obj["stores"][seed.ATTACH_STORE]["tree"]
+        drivers = dict((x["driver"], x["contribution"]) for x in t["drivers"])
+        split = dict((x["driver"], x["contribution"]) for x in t["ast_split"])
+        self.assertGreater(t["gap"], 0)
+        self.assertGreater(drivers["ast"], 0)
+        self.assertGreater(split["upt"], 0)
+        self.assertGreater(split["upt"], abs(split["aus"]))
+
+    def test_extract_carries_upt_and_its_comparison(self):
+        for key in ("upt", "upt_vs_ly", "ast_vs_ly", "aus_vs_ly"):
+            self.assertIn(key, self.obj["extract"]["columns"], key)
+        for row in self.obj["extract"]["rows"]:
+            b = self.obj["stores"][row["entity_id"]]["headline"]
+            self.assertEqual(row["upt"], b["upt"])
+            self.assertEqual(row["upt_vs_ly"], b["upt_pct_vs_ly"])
+
+    def test_upt_varies_by_day_so_a_coaching_signal_is_possible(self):
+        """A constant UPT makes the exception unfireable and the AUS x UPT
+        split decorative."""
+        seen = set()
+        for d in (ANCHOR, ANCHOR - dt.timedelta(days=1),
+                  ANCHOR - dt.timedelta(days=2)):
+            seen.add(round(self.da.basket(d, entity_id="LB-001")["upt"], 4))
+        self.assertGreater(len(seen), 1)
+
+
 class PersonaCase(unittest.TestCase):
     """BR-18: only the scope differs between personas, never the number."""
 
