@@ -68,6 +68,25 @@ class CatalogError(ValueError):
     pass
 
 
+def reconcile_display(rows, key, total):
+    """Make the DISPLAYED parts sum to the displayed whole.
+
+    Eleven hours or five categories each rounded to cents can miss their own
+    total by a penny — and after a currency conversion they usually do. The
+    underlying allocation is exact; this pushes the display residual onto the
+    largest row so a reader never sees a column that does not add up. BR-11 is
+    about what the reader can check, not only what the database knows."""
+    if not rows:
+        return
+    cents = [int(round(r[key] * 100)) for r in rows]
+    residual = int(round(total * 100)) - sum(cents)
+    if residual:
+        biggest = max(range(len(rows)), key=lambda i: (cents[i], -i))
+        cents[biggest] += residual
+    for r, c in zip(rows, cents):
+        r[key] = round(c / 100.0, 2)
+
+
 class DataAccess(object):
     """Query surface over `ops.db` + the NRF calendar."""
 
@@ -1037,11 +1056,13 @@ class DataAccess(object):
             (day.isoformat(), entity_id)).fetchall()
         ccy = self.entity(entity_id)["currency"]
         hours = [{"hour": h, "traffic": t,
-                  "net_sales": round(self.convert(n, ccy), 2),
+                  "net_sales": self.convert(n, ccy),
                   "net_sales_local": n, "transactions": x}
                  for h, t, n, x in rows]
         day_row = self.sales_row(entity_id, day)
         day_net = self.net_sales_of(entity_id, day)
+        if day_net is not None:
+            reconcile_display(hours, "net_sales", day_net)
         sum_net = round(sum(h["net_sales"] for h in hours), 2)
         sum_txn = sum(h["transactions"] for h in hours)
         return {

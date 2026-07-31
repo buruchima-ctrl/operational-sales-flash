@@ -21,7 +21,7 @@ from __future__ import annotations
 import datetime as dt
 from typing import Dict, List, Optional
 
-from flash.catalog import CatalogError, THRESHOLDS
+from flash.catalog import CatalogError, THRESHOLDS, reconcile_display
 
 D = dt.date
 
@@ -113,7 +113,7 @@ def category_day(da, day: D, **scope) -> Dict[str, object]:
             "aus": (sales / units) if units else None,
         })
     rows.sort(key=lambda r: (-r["net_sales"], r["category"]))
-    _reconcile_display(rows, "net_sales", total)
+    reconcile_display(rows, "net_sales", total)
     return {
         "available": True, "date": day.isoformat(), "ly_date": ly.isoformat(),
         "categories": rows, "total_net_sales": round(total, 2),
@@ -162,25 +162,6 @@ def _derived_category_plan(da, day: D, ly: D, all_ids, **scope):
             planned_actual[cat] = planned_actual.get(cat, 0.0) + da.convert(v, ccy)
     return {"plan": plan, "planned_actual": planned_actual,
             "entities": sorted(plan_ids)}
-
-
-def _reconcile_display(rows, key, total):
-    """Make the DISPLAYED parts sum to the displayed whole.
-
-    Five categories each rounded to cents can miss their own total by a penny.
-    The underlying allocation is exact; this pushes the display residual onto
-    the largest row so a reader never sees a column that does not add up.
-    BR-11 is about what the reader can check, not only what the database
-    knows."""
-    if not rows:
-        return
-    cents = [int(round(r[key] * 100)) for r in rows]
-    residual = int(round(total * 100)) - sum(cents)
-    if residual:
-        biggest = max(range(len(rows)), key=lambda i: (cents[i], -i))
-        cents[biggest] += residual
-    for r, c in zip(rows, cents):
-        r[key] = round(c / 100.0, 2)
 
 
 def _brand_of(da, category):
