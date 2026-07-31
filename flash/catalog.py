@@ -1208,6 +1208,7 @@ class DataAccess(object):
         own driver values. The calculator multiplies them; it does not contain
         a second copy of any formula."""
         ly = self.ly_date(day)
+        e = self.entity(entity_id)
         cur = self._tree_point(entity_id, day)
         prior = self._tree_point(entity_id, ly)
         if cur is None or prior is None:
@@ -1247,11 +1248,22 @@ class DataAccess(object):
             "residual_interaction": round(residual, 2),
             "method": "sequential (waterfall) attribution, fixed driver order "
                       "traffic -> conversion -> AST; AST split AUS -> UPT",
+            # The payload carries UNROUNDED money. Rounding it to cents here
+            # would make traffic x conversion x AST disagree with net_sales by
+            # a fraction, and a reader converting a USD figure back to the
+            # door's own currency would land a cent away from the store page.
+            # Display rounding happens once, in the renderer (BR-16).
             "payload": {"traffic": t1, "conversion": c1, "aus": u1, "upt": p1,
-                        "ast": a1, "net_sales": round(s1, 2),
+                        "ast": a1, "net_sales": s1,
                         "ly_traffic": t0, "ly_conversion": c0, "ly_aus": u0,
-                        "ly_upt": p0, "ly_ast": a0, "ly_net_sales": round(s0, 2),
-                        "currency": self.reporting_currency},
+                        "ly_upt": p0, "ly_ast": a0, "ly_net_sales": s0,
+                        "currency": self.reporting_currency,
+                        "local_currency": e["currency"],
+                        "net_sales_local": self.net_sales_local_of(entity_id, day),
+                        "ly_net_sales_local": self.net_sales_local_of(entity_id, ly),
+                        "fx_units_per_usd": self.fx().get(e["currency"]),
+                        "fx_disclosure": self.fx_disclosure(e["currency"]),
+                        "converted": e["currency"] != self.reporting_currency},
         }
 
     def _tree_point(self, entity_id, day: D):

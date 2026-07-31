@@ -35,6 +35,7 @@ from html import escape as esc
 from typing import Dict, List, Optional
 
 from flash import fmt
+from flash.catalog import reconcile_display
 from flash.focus import _slug
 
 D = dt.date
@@ -345,6 +346,37 @@ def _legend() -> str:
             'input the business asserted · <i class="blue">blue</i> = a figure '
             'presented as given · <i class="calc">green</i> = calculated here. '
             'Dotted underline = hover for the formula.</div>')
+
+
+def _currency_band(obj, local_ccy: str, local_total=None,
+                   converted_total=None, what: str = "This door") -> str:
+    """The BR-16 disclosure, with the NUMERIC rate, wherever a converted figure
+    appears.
+
+    "converted at the seeded fixed plan rate" is not a disclosure — a reader
+    cannot check it. The rate itself is the disclosure, so it is printed as a
+    number on every page that shows a converted figure, next to the native
+    figure the reader can compare it against."""
+    fx = obj.get("fx") or {}
+    reporting = fx.get("reporting_currency", obj.get("reporting_currency", "USD"))
+    if local_ccy == reporting:
+        return ""
+    rate = (fx.get("rates") or {}).get(local_ccy)
+    disclosure = (fx.get("disclosures") or {}).get(local_ccy, "")
+    native = ("Native total %s %s. " % (fmt.money_exact(local_total), local_ccy)
+              if local_total is not None else "")
+    shown = ("Shown above as %s %s. " % (fmt.money_exact(converted_total), reporting)
+             if converted_total is not None else "")
+    return _band(
+        "gold", "Currency — %s converted at %s %s per %s"
+        % (local_ccy, fmt.ratio(rate), local_ccy, reporting),
+        "%s trades in %s. %s%sThe rate is %s %s per 1 %s — %s. It is fixed and "
+        "seeded, it is the only rate used anywhere on this site, and it is "
+        "stated here because a converted figure without its rate cannot be "
+        "checked (BR-16)."
+        % (esc(what), esc(local_ccy), esc(native), esc(shown),
+           esc(fmt.ratio(rate)), esc(local_ccy), esc(reporting),
+           esc(disclosure)))
 
 
 def _fav_key() -> str:
@@ -1323,6 +1355,8 @@ def render_district(obj, district_id: str, nav) -> str:
                  "%d doors · %d posted · %s"
                  % (row["open_entities"], row["reported_entities"],
                     esc(d["week_label"])))]
+    for ccy in row.get("currencies", []):
+        o.append(_currency_band(obj, ccy, what="Every door in %s" % row["label"]))
     o.append('<div class="tiles">%s%s%s%s%s</div>' % (
         _tile("Net sales", fmt.money_compact(row["net_sales"]), "",
               fmt.money_exact(row["net_sales"])),
@@ -1407,14 +1441,8 @@ def render_store(obj, entity_id: str, nav) -> str:
               hd["omni_penetration_bps"] + " vs LY"),
     ]))
 
-    if b["currency"] != obj["reporting_currency"]:
-        o.append(_band("gold", "Currency",
-                       "This door trades in %s. Its figures are shown converted "
-                       "to %s above; the native total is %s. The rate is the "
-                       "seeded fixed plan rate and it is the only rate used "
-                       "anywhere on this site (BR-16)."
-                       % (esc(b["currency"]), esc(obj["reporting_currency"]),
-                          esc(hd["net_sales_local"]))))
+    o.append(_currency_band(obj, b["currency"], b["net_sales_local"],
+                            h["net_sales"], what=b["name"]))
 
     o.append("<h2>Hours — the day's shape</h2>")
     o.append(_hour_bars(b["hourly"]["hours"], "traffic"))
@@ -1557,62 +1585,76 @@ def _store_customer(b) -> str:
               "%s new buyers" % fmt.count(c["wtd"]["new_buyers"]), small=True))
 
 
+def tree_contributions(t):
+    """Driver contributions at CENT precision, reconciled so the displayed
+    column sums to the displayed gap.
+
+    The underlying waterfall telescopes exactly — that is proved on the object
+    and re-proved in the tests. What broke here was the display: compact money
+    rounds anything under $1,000 to whole dollars, so +$404.85, −$665.31 and
+    −$11.45 printed as +$405, −$665 and −$11 and summed to −$271 against a
+    gap of −$272. A column a reader adds up has to add up, so contributions
+    are shown to the cent and any residual from the object's own per-part
+    rounding lands on the largest part — the same rule the category and hourly
+    tables use."""
+    rows = [{"driver": x["driver"], "ty": x["ty"], "ly": x["ly"],
+             "contribution": x["contribution"]} for x in t["drivers"]]
+    reconcile_display(rows, "contribution", t["gap"])
+    ast = next(r for r in rows if r["driver"] == "ast")
+    split = [{"driver": x["driver"], "ty": x["ty"], "ly": x["ly"],
+              "contribution": x["contribution"]} for x in t["ast_split"]]
+    reconcile_display(split, "contribution", ast["contribution"])
+    return rows, split
+
+
 def _tree_nodes(t) -> str:
     if not t.get("available"):
         return _band("note", "Tree unavailable", esc(t.get("reason", "")))
-    dr = {x["driver"]: x for x in t["drivers"]}
-    def node(label, ty, ly, contrib, is_money=False):
-        f = fmt.money_plain if is_money else (lambda v: fmt.ratio(v, 4))
+    rows, split = tree_contributions(t)
+    dr = {x["driver"]: x for x in rows}
+    sp = {x["driver"]: x for x in split}
+
+    def node(label, value, ly_value, contrib):
         return ('<div class="node"><div class="l">%s</div>'
                 '<div class="v">%s</div>'
                 '<div class="c soft">LY %s</div>'
                 '<div class="c %s">%s to the gap</div></div>'
-                % (esc(label), esc(f(ty)), esc(f(ly)),
+                % (esc(label), esc(value), esc(ly_value),
                    "good" if contrib >= 0 else "bad",
-                   esc(fmt.money_signed(contrib))))
+                   esc(fmt.money_signed_exact(contrib))))
+
     o = ['<div class="tree">']
-    o.append('<div class="node"><div class="l">Traffic</div><div class="v">%s</div>'
-             '<div class="c soft">LY %s</div><div class="c %s">%s to the gap</div>'
-             '</div>' % (esc(fmt.count(dr["traffic"]["ty"])),
-                         esc(fmt.count(dr["traffic"]["ly"])),
-                         "good" if dr["traffic"]["contribution"] >= 0 else "bad",
-                         esc(fmt.money_signed(dr["traffic"]["contribution"]))))
-    o.append('<div class="node op">×</div>')
-    o.append('<div class="node"><div class="l">Conversion</div><div class="v">%s</div>'
-             '<div class="c soft">LY %s</div><div class="c %s">%s to the gap</div>'
-             '</div>' % (esc(fmt.pct_plain(dr["conversion"]["ty"], 2)),
-                         esc(fmt.pct_plain(dr["conversion"]["ly"], 2)),
-                         "good" if dr["conversion"]["contribution"] >= 0 else "bad",
-                         esc(fmt.money_signed(dr["conversion"]["contribution"]))))
-    o.append('<div class="node op">×</div>')
-    o.append(node("AST", dr["ast"]["ty"], dr["ast"]["ly"],
-                  dr["ast"]["contribution"], is_money=True))
+    o.append(node("Traffic", fmt.count(dr["traffic"]["ty"]),
+                  fmt.count(dr["traffic"]["ly"]), dr["traffic"]["contribution"]))
+    o.append(u'<div class="node op">×</div>')
+    o.append(node("Conversion", fmt.pct_plain(dr["conversion"]["ty"], 2),
+                  fmt.pct_plain(dr["conversion"]["ly"], 2),
+                  dr["conversion"]["contribution"]))
+    o.append(u'<div class="node op">×</div>')
+    o.append(node("AST", fmt.money_plain(dr["ast"]["ty"]),
+                  fmt.money_plain(dr["ast"]["ly"]), dr["ast"]["contribution"]))
     o.append('<div class="node op">=</div>')
     o.append('<div class="node"><div class="l">Net sales</div><div class="v">%s</div>'
              '<div class="c soft">LY %s</div><div class="c %s">gap %s</div></div>'
-             % (esc(fmt.money_compact(t["actual"])), esc(fmt.money_compact(t["ly"])),
+             % (esc(fmt.money_exact(t["actual"])), esc(fmt.money_exact(t["ly"])),
                 "good" if t["gap"] >= 0 else "bad",
-                esc(fmt.money_signed(t["gap"]))))
+                esc(fmt.money_signed_exact(t["gap"]))))
     o.append('</div>')
-    sp = {x["driver"]: x for x in t["ast_split"]}
+
     o.append('<div class="tree">')
-    o.append('<div class="node op">↳</div>')
-    o.append(node("AUS", sp["aus"]["ty"], sp["aus"]["ly"],
-                  sp["aus"]["contribution"], is_money=True))
-    o.append('<div class="node op">×</div>')
-    o.append('<div class="node"><div class="l">UPT</div><div class="v">%s</div>'
-             '<div class="c soft">LY %s</div><div class="c %s">%s to the gap</div>'
-             '</div>' % (esc(fmt.ratio(sp["upt"]["ty"])),
-                         esc(fmt.ratio(sp["upt"]["ly"])),
-                         "good" if sp["upt"]["contribution"] >= 0 else "bad",
-                         esc(fmt.money_signed(sp["upt"]["contribution"]))))
+    o.append(u'<div class="node op">↳</div>')
+    o.append(node("AUS", fmt.money_plain(sp["aus"]["ty"]),
+                  fmt.money_plain(sp["aus"]["ly"]), sp["aus"]["contribution"]))
+    o.append(u'<div class="node op">×</div>')
+    o.append(node("UPT", fmt.ratio(sp["upt"]["ty"]), fmt.ratio(sp["upt"]["ly"]),
+                  sp["upt"]["contribution"]))
     o.append('</div>')
-    o.append(_recon("Traffic %s + conversion %s + AST %s = %s, the gap, exactly. "
-                    "Residual interaction %s. %s"
-                    % (fmt.money_signed(dr["traffic"]["contribution"]),
-                       fmt.money_signed(dr["conversion"]["contribution"]),
-                       fmt.money_signed(dr["ast"]["contribution"]),
-                       fmt.money_signed(t["gap"]),
+    o.append(_recon(u"Traffic %s, conversion %s and AST %s sum to %s — the "
+                    u"sales gap, to the cent. Residual interaction %s. %s"
+                    % (fmt.money_signed_exact(dr["traffic"]["contribution"]),
+                       fmt.money_signed_exact(dr["conversion"]["contribution"]),
+                       fmt.money_signed_exact(dr["ast"]["contribution"]),
+                       fmt.money_signed_exact(t["gap"]),
                        fmt.money_exact(t["residual_interaction"]), t["method"])))
     return "".join(o)
 
@@ -1630,6 +1672,8 @@ def render_hourly(obj, entity_id: str, nav) -> str:
                  "%s — %s" % (b["name"], d["date_long"]),
                  "Hours %02d:00–%02d:00 local · unaudited intraday view"
                  % (hs["open_hour"], hs["close_hour"]))]
+    o.append(_currency_band(obj, b["currency"], b["net_sales_local"],
+                            b["headline"]["net_sales"], what=b["name"]))
     o.append(_band("gold", "Intraday and unaudited (BR-17)",
                    "%s Hourly buckets are an allocation of the posted day, so "
                    "they sum to it exactly: hourly total %s against the posted "
@@ -1775,22 +1819,35 @@ def render_tree(obj, entity_id: str, nav) -> str:
          _header("KPI tree · %s" % b["region"],
                  "%s — %s" % (b["name"], d["date_long"]),
                  "Sales = Traffic × Conversion × AST · AST = AUS × UPT")]
+    o.append(_currency_band(obj, b["currency"], b.get("net_sales_local"),
+                            b["headline"]["net_sales"] if b["posted"] else None,
+                            what=b["name"]))
     o.append(_tree_nodes(t))
     if not t.get("available"):
         o.append(_footer())
         return _page("KPI tree — %s" % b["name"], "\n".join(o), depth=depth)
 
     o.append("<h2>Driver contributions</h2>")
-    rows = [(x["driver"].upper(), fmt.money_signed(x["contribution"]))
-            for x in t["drivers"]]
-    rows.append((("total", "Sum = the sales gap"), fmt.money_signed(t["gap"])))
+    contribs, split = tree_contributions(t)
+    rows = [(x["driver"].upper(), fmt.money_signed_exact(x["contribution"]))
+            for x in contribs]
+    rows.append((("total", "Sum = the sales gap"),
+                 fmt.money_signed_exact(t["gap"])))
     rows.append(("Residual interaction", fmt.money_exact(t["residual_interaction"])))
     o.append(_table(["Driver", "Contribution to the gap"], rows,
                     titles=["sequential attribution, fixed order traffic → "
                             "conversion → AST", None]))
+    o.append(_table(["AST splits into", "Contribution to the gap"],
+                    [(x["driver"].upper(), fmt.money_signed_exact(x["contribution"]))
+                     for x in split]
+                    + [(("total", "Sum = the AST contribution"),
+                        fmt.money_signed_exact(
+                            next(c["contribution"] for c in contribs
+                                 if c["driver"] == "ast")))]))
     o.append(_recon("Sequential attribution telescopes exactly, so the residual "
                     "is zero by construction — it is computed and shown rather "
-                    "than assumed (BR-20)."))
+                    "than assumed (BR-20). Both columns above are shown to the "
+                    "cent so that they sum to their own totals as printed."))
 
     payload = dict(t["payload"])
     payload["model"] = "sales = traffic x conversion x AST"
@@ -1801,6 +1858,26 @@ def render_tree(obj, entity_id: str, nav) -> str:
         "traffic": fmt.count(t["payload"]["traffic"]),
         "ast": fmt.money_plain(t["payload"]["ast"]),
     }
+    if payload.get("converted"):
+        # A reader who converts the USD figure back must land on the door's own
+        # posted figure, not a cent away from it. So the native figure is
+        # printed rather than left to be derived, and the rate is stated with
+        # it (BR-16).
+        o.append("<h2>This door's own currency</h2>")
+        o.append(_table(
+            ["", "%s (native)" % payload["local_currency"],
+             "%s (converted at %s)" % (payload["currency"],
+                                       fmt.ratio(payload["fx_units_per_usd"]))],
+            [("Net sales", fmt.money_exact(payload["net_sales_local"]),
+              fmt.money_exact(payload["net_sales"])),
+             ("LY net sales", fmt.money_exact(payload["ly_net_sales_local"]),
+              fmt.money_exact(payload["ly_net_sales"]))]))
+        o.append(_recon(
+            "The native figure is the door's posted total; the converted one is "
+            "that figure divided once by %s. The calculator below works in %s "
+            "and carries unrounded values, so converting its answer back at the "
+            "same rate returns the native figure exactly (BR-16)."
+            % (fmt.ratio(payload["fx_units_per_usd"]), payload["currency"])))
     o.append("<h2>What if — the calculator</h2>")
     o.append(_whatif_box(payload))
     o.append('<p class="key"><a href="%s">← Store Manager page</a> · '

@@ -296,8 +296,8 @@ class TreeCalculatorCase(unittest.TestCase):
         from flash import fmt
         t = self.obj["stores"][seed.CONV_STORE]["tree"]
         for driver in t["drivers"]:
-            self.assertIn(fmt.money_signed(driver["contribution"]), self.page)
-        self.assertIn(fmt.money_signed(t["gap"]), self.page)
+            self.assertIn(fmt.money_signed_exact(driver["contribution"]), self.page)
+        self.assertIn(fmt.money_signed_exact(t["gap"]), self.page)
 
     def test_three_sampled_store_days_compose_exactly(self):
         n = 0
@@ -312,6 +312,198 @@ class TreeCalculatorCase(unittest.TestCase):
                 s = sum(x["contribution"] for x in t["drivers"])
                 self.assertAlmostEqual(s, t["gap"], places=1)
         self.assertGreaterEqual(n, 3)
+
+
+TAG_RE = re.compile(r"<[^>]+>")
+JSON_RE = re.compile(r'<script id="tree-payload"[^>]*>.*?</script>', re.S)
+MONEY_RE = re.compile(r"^[+\u2212-]?\$[\d,]+(?:\.\d+)?$")
+
+
+def _visible(html):
+    """Page text with tags and the JSON payload removed — what a reader sees.
+
+    The payload block is stripped deliberately: a currency stated only inside a
+    machine-readable blob is not a disclosure to a human, which is exactly the
+    defect this helper exists to catch."""
+    return TAG_RE.sub(" ", JSON_RE.sub(" ", html))
+
+
+def _money(text):
+    return float(text.replace("\u2212", "-").replace("+", "")
+                 .replace("$", "").replace(",", ""))
+
+
+class CurrencyDisclosureCase(unittest.TestCase):
+    """BR-16: a converted figure without its rate cannot be checked, so the
+    NUMERIC rate appears on every page that shows one."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.dir = dbfixture.site_dir()
+        cls.obj = dbfixture.site_objects()[-1]
+        cls.date = cls.obj["date"]
+        cls.ca_doors = sorted(
+            eid for eid, b in cls.obj["stores"].items()
+            if b["currency"] != cls.obj["reporting_currency"])
+        cls.rate = str(seed.FX_CAD_PER_USD)
+
+    def test_the_fixture_actually_has_foreign_currency_doors(self):
+        self.assertGreaterEqual(len(self.ca_doors), 4)
+
+    def test_every_ca_door_page_states_the_numeric_rate(self):
+        for eid in self.ca_doors:
+            txt = _visible(_read(os.path.join(self.dir, "store", eid,
+                                              "%s.html" % self.date)))
+            self.assertIn(self.rate, txt, "%s door page omits the rate" % eid)
+            self.assertIn("CAD", txt, eid)
+            self.assertIn("USD", txt, eid)
+
+    def test_every_ca_tree_page_states_the_numeric_rate(self):
+        for eid in self.ca_doors:
+            path = os.path.join(self.dir, "store", eid, "tree",
+                                "%s.html" % self.date)
+            if not os.path.exists(path):
+                continue
+            txt = _visible(_read(path))
+            self.assertIn(self.rate, txt, "%s tree page omits the rate" % eid)
+
+    def test_every_ca_hourly_page_states_the_numeric_rate(self):
+        for eid in self.ca_doors:
+            path = os.path.join(self.dir, "store", eid, "hourly",
+                                "%s.html" % self.date)
+            if not os.path.exists(path):
+                continue
+            self.assertIn(self.rate, _visible(_read(path)), eid)
+
+    def test_the_canadian_district_page_states_the_numeric_rate(self):
+        ca_districts = sorted(set(
+            self.obj["stores"][eid]["district_id"] for eid in self.ca_doors))
+        self.assertTrue(ca_districts)
+        for d in ca_districts:
+            txt = _visible(_read(os.path.join(self.dir, "district", d,
+                                              "%s.html" % self.date)))
+            self.assertIn(self.rate, txt, d)
+
+    def test_the_affiliate_landing_states_the_numeric_rate(self):
+        txt = _visible(_read(os.path.join(self.dir, "affiliate", "CA",
+                                          "%s.html" % self.date)))
+        self.assertIn(self.rate, txt)
+
+    def test_a_us_door_page_does_not_carry_a_conversion_note(self):
+        txt = _visible(_read(os.path.join(self.dir, "store", "LB-001",
+                                          "%s.html" % self.date)))
+        self.assertNotIn("converted at", txt)
+
+    def test_tree_payload_roundtrips_to_the_native_figure(self):
+        """A reader converting the tree's USD figure back at the stated rate
+        must land on the door's own posted total, not a cent away from it."""
+        for eid in self.ca_doors:
+            path = os.path.join(self.dir, "store", eid, "tree",
+                                "%s.html" % self.date)
+            if not os.path.exists(path):
+                continue
+            payload = json.loads(re.search(
+                r'<script id="tree-payload"[^>]*>(.*?)</script>',
+                _read(path), re.S).group(1))
+            self.assertTrue(payload["converted"], eid)
+            self.assertAlmostEqual(
+                payload["net_sales"] * payload["fx_units_per_usd"],
+                payload["net_sales_local"], places=2, msg=eid)
+            self.assertAlmostEqual(
+                payload["ly_net_sales"] * payload["fx_units_per_usd"],
+                payload["ly_net_sales_local"], places=2, msg=eid)
+
+
+class DisplayedColumnsAddUpCase(unittest.TestCase):
+    """A column a reader adds up has to add up. The object's arithmetic being
+    right is not enough if the printed figures round apart."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.dir = dbfixture.site_dir()
+        cls.obj = dbfixture.site_objects()[-1]
+
+    def _tables_with_totals(self, html):
+        for tbl in re.findall(r"<table[^>]*>(.*?)</table>", html, re.S):
+            if 'class="tot"' not in tbl:
+                continue
+            rows = []
+            for m in re.finditer(r"<tr([^>]*)>(.*?)</tr>", tbl, re.S):
+                attrs, body = m.group(1), m.group(2)
+                cells = [TAG_RE.sub("", c).strip()
+                         for c in re.findall(r"<t[dh][^>]*>(.*?)</t[dh]>", body, re.S)]
+                if cells:
+                    rows.append(('class="tot"' in attrs, cells))
+            yield rows
+
+    def test_every_tree_pages_contribution_columns_sum_to_their_totals(self):
+        checked = 0
+        for r, _d, files in os.walk(os.path.join(self.dir, "store")):
+            if os.path.basename(r) != "tree":
+                continue
+            for f in sorted(files):
+                html = _read(os.path.join(r, f))
+                if "Tree unavailable" in html:
+                    continue
+                for rows in self._tables_with_totals(html):
+                    parts, total = [], None
+                    for is_total, cells in rows:
+                        if len(cells) < 2 or not MONEY_RE.match(cells[1]):
+                            continue
+                        if is_total:
+                            total = _money(cells[1])
+                        elif cells[0] != "Residual interaction":
+                            parts.append(_money(cells[1]))
+                    if total is None or not parts:
+                        continue
+                    checked += 1
+                    self.assertAlmostEqual(
+                        sum(parts), total, places=2,
+                        msg="%s: parts %s sum to %.2f against a printed total "
+                            "of %.2f" % (os.path.join(r, f), parts,
+                                         sum(parts), total))
+        self.assertGreater(checked, 20)
+
+    def test_the_tree_column_matches_the_objects_own_gap(self):
+        from flash import render_site as rs
+        for eid in sorted(self.obj["stores"]):
+            t = self.obj["stores"][eid].get("tree") or {}
+            if not t.get("available"):
+                continue
+            contribs, split = rs.tree_contributions(t)
+            self.assertAlmostEqual(sum(c["contribution"] for c in contribs),
+                                   t["gap"], places=2, msg=eid)
+            ast = next(c["contribution"] for c in contribs
+                       if c["driver"] == "ast")
+            self.assertAlmostEqual(sum(c["contribution"] for c in split),
+                                   ast, places=2, msg=eid)
+
+    def test_contributions_are_displayed_at_cent_precision(self):
+        """Compact money rounds under $1,000 to whole dollars, which is what
+        broke the column. Every contribution must carry cents."""
+        page = _read(os.path.join(self.dir, "store", seed.CONV_STORE, "tree",
+                                  "%s.html" % self.obj["date"]))
+        t = self.obj["stores"][seed.CONV_STORE]["tree"]
+        from flash import fmt
+        for driver in t["drivers"]:
+            exact = fmt.money_signed_exact(driver["contribution"])
+            self.assertIn(exact, page, exact)
+            self.assertIn(".", exact)
+
+    def test_category_grid_total_matches_its_rows(self):
+        html = _read(os.path.join(self.dir, "merch",
+                                  "%s.html" % self.obj["date"]))
+        for rows in self._tables_with_totals(html):
+            parts, total = [], None
+            for is_total, cells in rows:
+                if len(cells) < 3 or not MONEY_RE.match(cells[2]):
+                    continue
+                if is_total:
+                    total = _money(cells[2])
+                else:
+                    parts.append(_money(cells[2]))
+            if total is not None and parts:
+                self.assertAlmostEqual(sum(parts), total, places=2)
 
 
 class PersonaPageCase(unittest.TestCase):

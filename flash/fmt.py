@@ -56,6 +56,22 @@ def money_signed(v: Optional[float]) -> str:
     return money_compact(v)
 
 
+def money_signed_exact(v: Optional[float]) -> str:
+    """Ledger deltas: +$404.85 / −$665.31.
+
+    `money_signed` is compact, which rounds anything under $1,000 to whole
+    dollars — fine for a headline, wrong for a column a reader adds up. Three
+    contributions of +$404.85, −$665.31 and −$11.45 compact to +$405, −$665 and
+    −$11, which sum to −$271 against a gap of −$272. A column that does not add
+    up is the defect this function exists to prevent, so any decomposition that
+    is displayed as a column uses this."""
+    if v is None:
+        return NA
+    if v >= 0:
+        return "+" + money_exact(v)
+    return money_exact(v)
+
+
 def pct(v: Optional[float], places: int = 1) -> str:
     """Signed percentage from a ratio-minus-one: +2.6% / -7.9%."""
     if v is None:

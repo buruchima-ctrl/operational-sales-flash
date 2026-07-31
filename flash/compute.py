@@ -129,6 +129,7 @@ def build_flash(da, day: D, as_of: Optional[D] = None, version: int = 1,
     obj["exceptions"] = build_exceptions(da, day, omni, customer_mod, merch)
     obj["recap"] = _recap(da, day, dow)
     obj["currency_note"] = da.currency_note()
+    obj["fx"] = _fx_block(da)
 
     if depth == "full":
         obj["personas"] = _personas(da, day, ly_override)
@@ -149,6 +150,21 @@ def build_flash(da, day: D, as_of: Optional[D] = None, version: int = 1,
 # =========================================================================
 # Comp, and the holiday override (BR-1)
 # =========================================================================
+
+def _fx_block(da) -> Dict[str, object]:
+    """The rate table, carried on every object so no surface has to look it up.
+
+    BR-16 says the rate is disclosed *wherever a converted figure appears* —
+    which means a store page and a tree page need the numeric rate as much as
+    the corporate landing does, and a renderer that has to go and find it will
+    eventually not bother."""
+    rates = da.fx()
+    return {
+        "reporting_currency": da.reporting_currency,
+        "rates": {c: r for c, r in sorted(rates.items())},
+        "disclosures": {c: da.fx_disclosure(c) for c in sorted(rates)},
+    }
+
 
 def _comp_block(da, day: D, week_aligned_ly: D, holiday: Optional[str],
                 restated: bool) -> Dict[str, object]:
@@ -343,6 +359,8 @@ def _slice(da, day: D, ly_override, kw: dict, label: str, key: str,
     conv = da.conversion(day, **kw)
     return {
         "key": key, "label": label, "region": region,
+        "currencies": da.currencies_in_scope(**kw),
+        "currency_note": da.currency_note(**kw),
         "net_sales": da.net_sales(day, **kw),
         "comp_pct": da.comp_pct(day, ly_override=ly_override, **kw),
         "comp_ty": pair["ty"], "comp_ly": pair["ly"], "comp_gap": pair["gap"],
@@ -724,6 +742,10 @@ def _store_blocks(da, day: D) -> Dict[str, object]:
             "state_province": e["state_province"],
             "store_status": e["store_status"],
             "open_date": e["open_date"],
+            "currency_note": da.currency_note(entity_id=eid),
+            "fx_units_per_usd": da.fx().get(e["currency"]),
+            "fx_disclosure": da.fx_disclosure(e["currency"]),
+            "converted": e["currency"] != da.reporting_currency,
             "posted": posted,
             "comp_eligible": da.comp_eligible(eid, day),
             "plan_grain": da.plan_grain_of(eid),
