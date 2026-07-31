@@ -31,7 +31,7 @@ python3 run_flash.py --companion # rebuild the summary companion only
 Or check the whole thing in one command:
 
 ```bash
-python3 run_flash.py --check # seed + storyline assertions + 252 tests + determinism
+python3 run_flash.py --check # seed + storyline assertions + 261 tests + determinism
 ```
 
 The demo clock is fixed: **today is 2026-07-24** and the latest complete day is
@@ -124,6 +124,29 @@ re-derive several of them a second way.
 - **Regeneration is byte-identical.** No wall clock, no random module — every
   variation is a stable hash of (entity, date, tag). Two builds produce the same
   database and the same `render/` tree, bit for bit.
+
+### Getting around a long page
+
+A dashboard that runs to fifteen sections needs a way down it. Every page with
+**four or more sections** carries a sticky sub-menu of anchor links directly
+under its masthead — the day flash, all five persona landings, the Store
+Manager page, and the omni, customer and merchandise panels where they run
+long. Below four sections the menu would be furniture rather than navigation,
+so a SKU page, a district table, a rank table and an hourly view do without.
+
+Every section heading carries a stable id — a slug of its own text,
+deduplicated in document order — so a link into a section survives a rebuild
+and is safe to share. Sections on a page with a menu also carry a small
+`↑ menu` link, so a reader can get back without scrolling.
+
+It is anchors and CSS, nothing else. `position: sticky` keeps the bar available
+while the page moves under it. **A scroll-spy active state would need
+JavaScript**, so the menu marks no current section — the what-if calculator
+remains the only script in the product.
+
+The digest gets the same idea in the form mail clients support: a plain jump
+list at the top, no sticky bar, with `name` emitted alongside `id` because
+older clients only look for the former.
 
 ### Every persona opens on what it can act on
 
@@ -311,7 +334,7 @@ targets takes about ten. Every artefact is byte-identical on a rebuild.
 python3 seed.py                                ~3s    49 assertions
 python3 run_flash.py --all                    ~10s    2,660 files, 35 MB
 python3 run_flash.py --companion               ~1s      601 files, 12 MB
-python3 -m unittest discover -s tests -t .     ~13s    252 tests
+python3 -m unittest discover -s tests -t .     ~13s    261 tests
 ```
 
 ---

@@ -34,6 +34,7 @@ import os
 import posixpath
 import re
 from html import escape as esc
+from html import unescape
 from typing import Dict, List, Optional
 
 from flash import fmt
@@ -65,6 +66,71 @@ OMNI_TITLES = {
     "BORIS": "Buy Online, Return In Store",
 }
 
+# A page earns a sub-menu at this many sections. Below it the menu would be
+# longer than the scroll it saves: a SKU page, a district table, a rank table
+# and an hourly view are one screen of content with two headings, and a
+# navigation bar over two headings is furniture, not navigation.
+MIN_SECTIONS_FOR_MENU = 4
+
+H2_RE = re.compile(r'<h2([^>]*)>(.*?)</h2>', re.S)
+TAGS_RE = re.compile(r"<[^>]+>")
+NAV_RE = re.compile(r'\s*data-nav="([^"]*)"')
+MENU_LABEL_MAX = 26
+
+
+def _nav_label(text: str) -> str:
+    """A menu label short enough to scan, from a heading written to be read.
+
+    Headings carry a subject and a subtitle — "Focus — what moved the comp".
+    The menu wants the subject. Cut at the em dash, then at the first comma;
+    a heading with neither and no explicit `data-nav` keeps its full text, and
+    the few that are still too long carry one."""
+    for sep in (" \u2014 ", ", "):
+        if sep in text:
+            head = text.split(sep)[0].strip()
+            if len(head) >= 4:
+                return head
+    return text
+
+
+def _sectionise(body: str, min_sections: int = MIN_SECTIONS_FOR_MENU):
+    """Give every section a stable id and, on a long enough page, a sticky
+    sub-menu above them.
+
+    Ids are slugs of the heading text, deduplicated by suffix in document
+    order, so they are deterministic across regenerations and stable as long
+    as the heading is — which is what makes a link into a section safe to
+    share. Returns (body, menu_html); menu_html is empty on a short page, and
+    a short page gets no back-to-menu links either, because there is nowhere
+    to go back to."""
+    titles = [TAGS_RE.sub("", m.group(2)).strip() for m in H2_RE.finditer(body)]
+    del titles[len(titles):]
+    has_menu = len(titles) >= min_sections
+    seen, items = {}, []
+
+    def repl(m):
+        attrs, inner = m.group(1) or "", m.group(2)
+        override = NAV_RE.search(attrs)
+        attrs = NAV_RE.sub("", attrs)
+        text = unescape(TAGS_RE.sub("", inner).strip())
+        sid = _slug(text) or "section"
+        seen[sid] = seen.get(sid, 0) + 1
+        if seen[sid] > 1:
+            sid = "%s-%d" % (sid, seen[sid])
+        items.append((sid, override.group(1) if override else _nav_label(text)))
+        top = ('<a class="totop" href="#menu">\u2191 menu</a>' if has_menu else "")
+        return '<h2 id="%s"%s>%s%s</h2>' % (sid, attrs, inner, top)
+
+    body = H2_RE.sub(repl, body)
+    if not has_menu:
+        return body, ""
+    links = "".join('<a href="#%s">%s</a>' % (esc(sid), esc(text))
+                    for sid, text in items)
+    menu = ('<nav class="submenu" id="menu" aria-label="Sections on this page">'
+            '<span class="sml">On this page</span>%s</nav>' % links)
+    return body, menu
+
+
 def _page(title: str, body: str, depth: int = 0, wrap_class: str = "",
           script: str = "") -> str:
     """Every page declares utf-8 and links its stylesheet relatively.
@@ -73,6 +139,16 @@ def _page(title: str, body: str, depth: int = 0, wrap_class: str = "",
     the link strategy: relative hrefs only, so the site works identically from
     `file://`, from `app.py`, and from a copied folder on any host."""
     up = "../" * depth
+    body, menu = _sectionise(body)
+    if menu:
+        # One placement rule for every page type and both render targets: the
+        # menu sits directly under the masthead, so it is in the same place
+        # whether the reader arrived at a day flash, a persona landing or a
+        # store manager page.
+        if "</header>" in body:
+            body = body.replace("</header>", "</header>\n" + menu, 1)
+        else:
+            body = menu + body
     o = ['<!doctype html>', '<html lang="en">', '<head>',
          '<meta charset="utf-8">',
          '<meta name="viewport" content="width=device-width,initial-scale=1">',
@@ -633,7 +709,7 @@ def render_day(obj, nav: Optional[Dict[str, object]] = None) -> str:
     a("<h2>Focus — what moved the comp</h2>")
     a(_day_focus(obj, d))
 
-    a("<h2>Store status and the three-tier view</h2>")
+    a('<h2 data-nav="Store status">Store status and the three-tier view</h2>')
     a(_day_status(obj, d))
 
     a("<h2>Plan, at each brand's own grain</h2>")
@@ -642,7 +718,7 @@ def render_day(obj, nav: Optional[Dict[str, object]] = None) -> str:
     a("<h2>Windows</h2>")
     a(_day_windows(d))
 
-    a("<h2>By brand, affiliate, region and channel</h2>")
+    a('<h2 data-nav="Slices">By brand, affiliate, region and channel</h2>')
     a(_day_slices(obj, d, depth))
 
     a("<h2>Omni — attribution, never addition</h2>")
@@ -1135,7 +1211,7 @@ def render_persona(obj, persona_key: str, nav: Dict[str, object]) -> str:
                   "favourable": "▲"}.get(e["severity"], "•")}
         for e in p["exceptions"]]}))
 
-    a("<h2>%s</h2>" % esc(p["scope_note"]))
+    a('<h2 data-nav="Scoped tables">%s</h2>' % esc(p["scope_note"]))
     a(_fav_key())
     for dim in p["rollups"]:
         a(_rollup_table(persona_key, dim, p["rollups"][dim], date_iso, depth))
@@ -2018,13 +2094,13 @@ def render_omni(obj, family: str, nav) -> str:
                   f["completion_basis"])))
         o.append(_band("note", "Two series, never one", esc(f["basis_warning"])))
 
-        o.append("<h2>Status of the day's created cohort</h2>")
+        o.append('<h2 data-nav="Status mix">Status of the day\'s created cohort</h2>')
         mix = f["status_mix"]
         o.append(_table(["Status", "Orders"],
                         [(k, fmt.count(v)) for k, v in sorted(mix.items())]))
 
         lift = f["lifts"]
-        o.append("<h2>Lift and share (recognized basis)</h2>")
+        o.append('<h2 data-nav="Lift and share">Lift and share (recognized basis)</h2>')
         o.append(_table(
             ["", "Value"],
             [("AOV", fmt.money_plain(lift["aov"])),
@@ -2133,7 +2209,7 @@ def render_customer(obj, nav) -> str:
     o.append(_table(["Channel", "Buyers", "New", "% new to file",
                      "New-customer sales", "New AST", "CRM flag"], rows))
 
-    o.append("<h2>New-buyer capture by omni family</h2>")
+    o.append('<h2 data-nav="New-buyer capture">New-buyer capture by omni family</h2>')
     rows = [(OMNI_TITLES[k], fmt.count(v["total_buyers"]),
              fmt.count(v["new_buyers"]), fmt.pct_plain(v["pct_new_to_file"]))
             for k, v in sorted(c["omni_capture"].items())]

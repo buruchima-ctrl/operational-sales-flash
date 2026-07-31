@@ -110,6 +110,42 @@ h1{
 .crumbs a:hover{color:var(--blue);background:none}
 .crumbs span.sep{padding:0 var(--sp-2);color:var(--rule)}
 
+/* -- in-page section navigation ---------------------------------------- */
+/* Sticky so it stays available while the reader scrolls — that is the whole
+   feature, and it is pure CSS. A scroll-spy active state would need
+   JavaScript, and the what-if calculator remains the only script on the site,
+   so the menu marks no current section. */
+nav.submenu{
+  position:sticky;top:0;z-index:5;
+  display:flex;flex-wrap:wrap;align-items:baseline;gap:2px var(--sp-1);
+  background:var(--paper);border-bottom:1px solid var(--rule);
+  padding:var(--sp-2) 0;margin:0 0 var(--sp-4);
+  /* bleed the background to the gutters so content cannot show through at
+     the edges of a narrow viewport */
+  box-shadow:0 0 0 12px var(--paper), 0 6px 10px -8px rgba(24,36,47,.22);
+}
+nav.submenu .sml{
+  font-family:var(--display);font-size:var(--fs-3xs);letter-spacing:.11em;
+  text-transform:uppercase;color:var(--faint);font-weight:700;
+  padding-right:var(--sp-2);white-space:nowrap;
+}
+nav.submenu a{
+  font-family:var(--display);font-size:var(--fs-sm);color:var(--ink-2);
+  padding:2px var(--sp-2);border-bottom:none;border-radius:2px;
+  white-space:nowrap;
+}
+nav.submenu a:hover{background:var(--blue-bg);color:var(--blue)}
+nav.submenu a:focus-visible{outline:2px solid var(--blue);outline-offset:1px}
+
+/* anchor targets clear the sticky bar rather than hiding under it */
+h2[id]{scroll-margin-top:64px}
+a.totop{
+  float:right;font-family:var(--display);font-size:var(--fs-3xs);
+  letter-spacing:.06em;text-transform:none;color:var(--faint);
+  font-weight:500;border-bottom:none;padding-left:var(--sp-3);
+}
+a.totop:hover{color:var(--blue);background:none}
+
 /* -- section headings -------------------------------------------------- */
 h2{
   font-family:var(--display);font-size:var(--fs-xs);letter-spacing:var(--track);
@@ -529,6 +565,10 @@ footer{
 
 /* -- responsive ----------------------------------------------------------- */
 @media (max-width:760px){
+  nav.submenu{gap:0}
+  nav.submenu a{font-size:var(--fs-xs);padding:2px var(--sp-1)}
+  nav.submenu .sml{display:none}
+  h2[id]{scroll-margin-top:88px}
   :root{--fs-base:15px;--fs-2xl:25px;--fs-xl:21px}
   .wrap{padding:var(--sp-3) var(--sp-3) var(--sp-7)}
   .tile{flex:1 1 140px}
@@ -539,7 +579,7 @@ footer{
 }
 @media print{
   body{background:#fff}
-  nav.personas,.pager{display:none}
+  nav.personas,nav.submenu,a.totop,.pager{display:none}
   .scroll{overflow:visible;border:none}
   a{color:var(--ink);border-bottom:none}
 }

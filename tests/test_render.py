@@ -1013,6 +1013,127 @@ def _slug_for(kind, key):
     return _slug(key) if kind == "region" else key
 
 
+ID_RE = re.compile(r'\sid="([^"]+)"')
+HASH_RE = re.compile(r'href="#([^"]+)"')
+H2_ID_RE = re.compile(r"<h2[^>]*>")
+SUBMENU_RE = re.compile(r'<nav class="submenu".*?</nav>', re.S)
+
+
+class SectionNavigationCase(unittest.TestCase):
+    """In-page navigation: anchors only, no script.
+
+    The sticky bar is CSS. A scroll-spy active state would need JavaScript, so
+    the menu marks no current section — the calculator stays the only script on
+    the site."""
+
+    MIN_SECTIONS = 4
+
+    @classmethod
+    def setUpClass(cls):
+        cls.site = dbfixture.site_dir()
+        cls.comp = dbfixture.companion_dir()
+        cls.obj = dbfixture.site_objects()[-1]
+        cls.date = cls.obj["date"]
+
+    def _pages(self, root):
+        for r, _d, fs in os.walk(root):
+            for f in sorted(fs):
+                if f.endswith(".html"):
+                    yield os.path.join(r, f)
+
+    def test_every_hash_link_resolves_on_its_own_page(self):
+        checked = 0
+        for root in (self.site, self.comp):
+            for p in self._pages(root):
+                txt = _read(p)
+                ids = set(ID_RE.findall(txt))
+                for target in HASH_RE.findall(txt):
+                    checked += 1
+                    self.assertIn(target, ids,
+                                  "%s links to #%s with no such id"
+                                  % (os.path.relpath(p, root), target))
+        self.assertGreater(checked, 2000)
+
+    def test_long_pages_carry_the_menu_and_short_ones_do_not(self):
+        with_menu = without = 0
+        for root in (self.site, self.comp):
+            for p in self._pages(root):
+                txt = _read(p)
+                if os.path.basename(os.path.dirname(p)) == "email":
+                    continue
+                n = len(H2_ID_RE.findall(txt))
+                has = bool(SUBMENU_RE.search(txt))
+                if n >= self.MIN_SECTIONS:
+                    with_menu += 1
+                    self.assertTrue(has, "%s has %d sections and no menu"
+                                    % (os.path.relpath(p, root), n))
+                else:
+                    without += 1
+                    self.assertFalse(has, "%s has only %d sections but a menu"
+                                     % (os.path.relpath(p, root), n))
+        self.assertGreater(with_menu, 200)
+        self.assertGreater(without, 200)
+
+    def test_the_menu_lists_every_section_on_the_page(self):
+        for rel in ("day/%s.html" % self.date, "corporate/%s.html" % self.date,
+                    "field/%s.html" % self.date,
+                    "store/LB-015/%s.html" % self.date,
+                    "merch/%s.html" % self.date,
+                    "omni/BOPIS/%s.html" % self.date):
+            txt = _read(os.path.join(self.site, rel))
+            menu = SUBMENU_RE.search(txt)
+            self.assertIsNotNone(menu, rel)
+            linked = HASH_RE.findall(menu.group(0))
+            heads = re.findall(r'<h2 id="([^"]+)"', txt)
+            self.assertEqual(linked, heads, rel)
+
+    def test_every_section_heading_has_an_id_even_without_a_menu(self):
+        for p in self._pages(self.site):
+            txt = _read(p)
+            for tag in H2_ID_RE.findall(txt):
+                self.assertIn(' id="', tag, "%s: %s" % (p, tag))
+
+    def test_section_ids_are_stable_across_a_rebuild(self):
+        path = tempfile.mkdtemp(prefix="opsflash-ids-")
+        try:
+            dbfixture.build_site_into(path)
+            for rel in ("day/%s.html" % self.date,
+                        "corporate/%s.html" % self.date):
+                a_ = re.findall(r'<h2 id="([^"]+)"',
+                                _read(os.path.join(self.site, rel)))
+                b_ = re.findall(r'<h2 id="([^"]+)"',
+                                _read(os.path.join(path, rel)))
+                self.assertEqual(a_, b_, rel)
+                self.assertEqual(len(a_), len(set(a_)), "duplicate ids in " + rel)
+        finally:
+            shutil.rmtree(path, ignore_errors=True)
+
+    def test_pages_with_a_menu_offer_a_way_back_to_it(self):
+        txt = _read(os.path.join(self.site, "day/%s.html" % self.date))
+        self.assertEqual(txt.count('class="totop"'),
+                         len(re.findall(r'<h2 id="', txt)))
+        short = _read(os.path.join(self.site, "sku/%s.html" % seed.BREAKOUT_SKU))
+        self.assertNotIn('class="totop"', short)
+
+    def test_the_menu_adds_no_javascript(self):
+        for rel in ("day/%s.html" % self.date, "corporate/%s.html" % self.date):
+            self.assertEqual(_read(os.path.join(self.site, rel)).count("<script"), 0)
+
+    def test_the_digest_opens_with_a_jump_list_and_no_sticky(self):
+        txt = _read(os.path.join(self.site, "email/%s.html" % self.date))
+        self.assertIn("In this digest", txt)
+        self.assertNotIn("position:sticky", txt)
+        ids = set(ID_RE.findall(txt))
+        targets = HASH_RE.findall(txt)
+        self.assertGreaterEqual(len(targets), 4)
+        for t in targets:
+            self.assertIn(t, ids)
+
+    def test_the_digest_stays_inside_its_budget(self):
+        for p in self._pages(os.path.join(self.site, "email")):
+            self.assertLess(os.path.getsize(p) / 1024.0, EMAIL_KB, p)
+
+
 class PersonaPageCase(unittest.TestCase):
     """BR-18 on the surface: the same figure, wherever it appears."""
 

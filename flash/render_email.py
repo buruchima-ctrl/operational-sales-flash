@@ -77,6 +77,49 @@ NUM = ("font-family:%s;font-variant-numeric:tabular-nums lining-nums;color:%s;"
 UP = "../"          # the digest sits one level down, at email/<date>.html
 
 
+MIN_SECTIONS_FOR_JUMP = 4
+
+
+def _slug(text: str) -> str:
+    out = []
+    for ch in text.lower():
+        if ch.isalnum():
+            out.append(ch)
+        elif out and out[-1] != "-":
+            out.append("-")
+    return "".join(out).strip("-") or "section"
+
+
+def _nav_label(text: str) -> str:
+    for sep in (" \u2014 ", ", "):
+        if sep in text:
+            head = text.split(sep)[0].strip()
+            if len(head) >= 4:
+                return head
+    return text
+
+
+def _jump_list(secs) -> str:
+    """The digest's own section list.
+
+    No sticky bar: mail clients do not support position:sticky, and half of
+    them would render it as a block floating over the content. A plain row of
+    anchors at the top is what every client that renders HTML at all will
+    follow, so that is what the digest gets."""
+    if len(secs) < MIN_SECTIONS_FOR_JUMP:
+        return ""
+    links = (' <span style="color:%s;">\u00b7</span> ' % RULE).join(
+        '<a href="#%s" style="color:%s;text-decoration:none;">%s</a>'
+        % (esc(sid), BLUE, esc(label)) for sid, label in secs)
+    return ('<tr><td style="padding:12px 22px 6px;border-bottom:1px solid %s;">'
+            '<div style="font-family:%s;font-size:9.5px;letter-spacing:0.11em;'
+            'text-transform:uppercase;color:%s;font-weight:700;'
+            'padding-bottom:5px;">In this digest</div>'
+            '<div style="font-family:%s;font-size:12px;line-height:1.9;'
+            'color:%s;">%s</div></td></tr>'
+            % (HAIR, DISPLAY, FAINT, DISPLAY, INK_2, links))
+
+
 def subject_line(obj) -> str:
     return obj["subject"]
 
@@ -108,24 +151,28 @@ def render(obj) -> str:
     a('<table role="presentation" cellpadding="0" cellspacing="0" border="0" '
       'style="%s">' % CARD)
 
+    secs = []
     _masthead(a, obj, d)
+    jump_at = len(out)
+    a("")                      # filled once the section list is known
     _headline(a, obj, d)
     _banners(a, obj, d)
     _narrative(a, obj)
-    _headlines(a, obj, d)
-    _exceptions(a, obj, d)
-    _kpis(a, obj, d)
-    _plan(a, obj, d)
-    _windows(a, obj, d)
-    _panels(a, obj, d)
-    _focus(a, obj, d)
-    _links(a, obj, d)
-    _disclosures(a, obj)
-    _method(a, obj)
+    _headlines(a, obj, d, secs)
+    _exceptions(a, obj, d, secs)
+    _kpis(a, obj, d, secs)
+    _plan(a, obj, d, secs)
+    _windows(a, obj, d, secs)
+    _panels(a, obj, d, secs)
+    _focus(a, obj, d, secs)
+    _links(a, obj, d, secs)
+    _disclosures(a, obj, secs)
+    _method(a, obj, secs)
 
     a('</table>')
     a('</td></tr></table>')
     a('</body></html>')
+    out[jump_at] = _jump_list(secs)
     return "\n".join(out) + "\n"
 
 
@@ -244,14 +291,14 @@ def _narrative(a, obj):
     a('</td></tr>')
 
 
-def _headlines(a, obj, d):
+def _headlines(a, obj, d, secs=None):
     """The corporate-scoped blocks, ahead of everything else. A digest that
     makes an operator scroll to find what needs doing has been written for the
     sender, not the reader."""
     h = obj["headlines"]
     for key, title, colour in (("attention", "Needs attention", BAD),
                                ("celebration", "Worth celebrating", CALC)):
-        _section(a, title)
+        _section(a, title, secs)
         a('<tr><td style="padding:0 22px 10px;">')
         if not h[key]:
             a('<div style="font-family:%s;font-size:13px;color:%s;">Nothing '
@@ -280,8 +327,8 @@ def _headlines(a, obj, d):
         a('</td></tr>')
 
 
-def _exceptions(a, obj, d):
-    _section(a, "Today's exceptions")
+def _exceptions(a, obj, d, secs=None):
+    _section(a, "Today's exceptions", secs)
     items = d["exceptions"]
     a('<tr><td style="padding:0 22px 10px;">')
     if not items:
@@ -310,9 +357,9 @@ def _exceptions(a, obj, d):
     a('</td></tr>')
 
 
-def _kpis(a, obj, d):
+def _kpis(a, obj, d, secs=None):
     """The ◆ digest metrics — the deck's KPI row, phone-shaped."""
-    _section(a, "KPI row")
+    _section(a, "KPI row", secs)
     rows = [
         ("Transactions", d["transactions"], d["txn_comp"]),
         ("AST — avg sale per transaction", d["ast"], d["ast_vs_ly"]),
@@ -330,9 +377,9 @@ def _kpis(a, obj, d):
     _table(a, ["", "Day", "vs LY"], rows, aligns=["left", "right", "right"])
 
 
-def _plan(a, obj, d):
+def _plan(a, obj, d, secs=None):
     ps = obj["plan_status"]
-    _section(a, "Plan — each brand at its own grain")
+    _section(a, "Plan — each brand at its own grain", secs)
     rows = [
         ("Day-planned (%d)" % ps["day_grain"]["entities"],
          d["plan_day_attainment"], "vs day plan"),
@@ -350,8 +397,8 @@ def _plan(a, obj, d):
     a('</td></tr>')
 
 
-def _windows(a, obj, d):
-    _section(a, "Windows")
+def _windows(a, obj, d, secs=None):
+    _section(a, "Windows", secs)
     rows = [(d["windows"][k]["label"], d["windows"][k]["net_sales"],
              d["windows"][k]["comp_pct"], d["windows"][k]["plan_attainment"])
             for k in ("LW", "WTD", "MTD", "QTD", "YTD")]
@@ -359,8 +406,8 @@ def _windows(a, obj, d):
            aligns=["left", "right", "right", "right"])
 
 
-def _panels(a, obj, d):
-    _section(a, "Omni, customer, merchandise")
+def _panels(a, obj, d, secs=None):
+    _section(a, "Omni, customer, merchandise", secs)
     rows = [("OMNI penetration", d["omni"]["penetration"],
              d["omni"]["penetration_bps"]),
             ("BOPIS recognized", d["omni"]["families"][0]["sales"],
@@ -379,9 +426,9 @@ def _panels(a, obj, d):
                aligns=["left", "right", "right", "right"])
 
 
-def _focus(a, obj, d):
+def _focus(a, obj, d, secs=None):
     f = d["focus"]
-    _section(a, "Focus — what moved the comp")
+    _section(a, "Focus — what moved the comp", secs)
     a('<tr><td style="padding:0 22px 8px;">')
     a('<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
       'border="0">')
@@ -417,8 +464,8 @@ DEEP_LINKS = (
 )
 
 
-def _links(a, obj, d):
-    _section(a, "Open the site")
+def _links(a, obj, d, secs=None):
+    _section(a, "Open the site", secs)
     a('<tr><td style="padding:0 22px 14px;">')
     target = obj.get("deep_links_date") or obj["date"]
     a('<div style="font-family:%s;font-size:13px;padding:4px 0;">'
@@ -463,8 +510,8 @@ def _link_policy(obj) -> str:
             "digest printed (BR-13)." % base)
 
 
-def _disclosures(a, obj):
-    _section(a, "Disclosures")
+def _disclosures(a, obj, secs=None):
+    _section(a, "Disclosures", secs)
     a('<tr><td style="padding:0 22px 12px;">')
     for item in obj["disclosures"]:
         a('<div style="font-family:%s;font-size:12px;line-height:1.5;color:%s;'
@@ -473,8 +520,8 @@ def _disclosures(a, obj):
     a('</td></tr>')
 
 
-def _method(a, obj):
-    _section(a, "Formula key")
+def _method(a, obj, secs=None):
+    _section(a, "Formula key", secs)
     a('<tr><td style="padding:0 22px 22px;">')
     for m in obj["method"]:
         a('<div style="font-family:%s;font-size:11px;line-height:1.5;color:%s;'
@@ -489,10 +536,20 @@ def _method(a, obj):
 
 # -- primitives -------------------------------------------------------------
 
-def _section(a, title):
+def _section(a, title, secs=None):
     """A section head with a short ink rule above it — the same device the site
-    uses, so the two surfaces are recognisably one product."""
+    uses, so the two surfaces are recognisably one product.
+
+    With a section register passed, the head also carries a named anchor and
+    records itself, so the digest can open with a jump list. `name` is emitted
+    alongside `id` because older mail clients only look for the former."""
+    sid = ""
+    if secs is not None:
+        sid = _slug(title)
+        secs.append((sid, _nav_label(title)))
     a('<tr><td style="padding:20px 22px 8px;">')
+    if sid:
+        a('<a id="%s" name="%s"></a>' % (esc(sid), esc(sid)))
     a('<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
       'border="0"><tr><td style="height:2px;width:30px;background:'
       + INK + ';font-size:0;line-height:0;">&nbsp;</td></tr></table>')
