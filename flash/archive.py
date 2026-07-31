@@ -27,7 +27,14 @@ from typing import Dict, List, Optional
 D = dt.date
 
 SEND_TIME = "T06:30:00-04:00"      # America/New_York, the single business TZ
-ARCHIVE_DAYS = 60                  # PRD §11: 60 generated days
+ARCHIVE_DAYS = 60                  # 60 generated days
+# Owner decision (2026-07-31): the archive is TIERED. Every day gets a flash
+# page, a morning digest and its restatement history; only the last
+# FULL_DEPTH_DAYS additionally get the drill-down tree of persona, district,
+# door, hourly, tree, category, SKU, omni, rank and extract pages. All 60 days
+# sit in the database at the same depth — only static page generation is
+# tiered, so nothing is unavailable, it is simply not pre-rendered.
+FULL_DEPTH_DAYS = 14
 LATEST_COMPLETE = D(2026, 7, 23)   # never now() (NFR-2)
 TODAY = D(2026, 7, 24)
 
@@ -119,7 +126,7 @@ def restatement_reason(v1, v2) -> str:
     not carry the numbers is not a reason — it is an apology)."""
     from flash import fmt
     return (
-        "E-commerce settled late. The flash sent on the morning of %s carried "
+        "E-commerce settled late. The digest sent on the morning of %s carried "
         "%s on the day-of DEMAND basis (orders placed), which is all the "
         "fulfillment file could support at send time. The file closed on %s "
         "and the SHIPPED figures for %s came in at %s. This version restates "

@@ -133,14 +133,23 @@ def _category_day_uncached(da, day: D, **scope) -> Dict[str, object]:
             "aus": (sales / units) if units else None,
         })
     rows.sort(key=lambda r: (-r["net_sales"], r["category"]))
-    reconcile_display(rows, "net_sales", total)
+    reconcile_display(rows, "net_sales", _posted_total(da, day, all_ids))
     return {
         "available": True, "date": day.isoformat(), "ly_date": ly.isoformat(),
         "categories": rows, "total_net_sales": round(total, 2),
         "reconciliation": {
             "sum_of_categories": round(sum(r["net_sales"] for r in rows), 2),
-            "entity_day_total": da.net_sales(day, **scope),
+            "entity_day_total": _posted_total(da, day, all_ids),
+            "basis": "posted (demand) net sales",
         },
+        "basis_note": (
+            "SKU lines are allocated from POSTED net sales — e-commerce demand, "
+            "not the settled file, which carries no SKU detail. On a settled "
+            "view the headline moves and these category figures do not; that is "
+            "disclosed rather than reconciled away (BR-4)."
+            if da.ecom_basis == "settled" else
+            "SKU lines are an allocation of the posted day, so categories sum "
+            "to the door totals exactly (BR-11)."),
         "plan_basis": "Category plan is DERIVED, not planned: each DAY-grain "
                       "entity's day plan is split by that entity's own "
                       "LY-aligned category mix. `planned_actual` restricts the "
@@ -182,6 +191,22 @@ def _derived_category_plan(da, day: D, ly: D, all_ids, **scope):
             planned_actual[cat] = planned_actual.get(cat, 0.0) + da.convert(v, ccy)
     return {"plan": plan, "planned_actual": planned_actual,
             "entities": sorted(plan_ids)}
+
+
+def _posted_total(da, day: D, ids) -> float:
+    """Σ posted net sales in reporting currency, on the DEMAND basis.
+
+    SKU lines are allocated out of the posted (demand) figure, so this is the
+    total they can reconcile to. Using the settled headline here would compare
+    a demand-derived rollup against a shipped total and report a break that is
+    really a basis difference (BR-4)."""
+    total = 0.0
+    for eid in ids:
+        row = da.sales_row(eid, day)
+        if row is None:
+            continue
+        total += da.convert(row["net_sales"], da.entity(eid)["currency"])
+    return round(total, 2)
 
 
 def _brand_of(da, category):
@@ -295,6 +320,8 @@ def sku_movers(da, day: D, n: int = 10, category: Optional[str] = None,
         rows.append({
             "sku_id": sku, "name": p["name"], "category": p["category"],
             "brand_id": p["brand_id"], "launch_date": p["launch_date"],
+            "brand_name": da.brand(p["brand_id"])["name"],
+            "unit_price": p["unit_price"],
             "days_since_launch": (day - D.fromisoformat(p["launch_date"])).days,
             "ty": round(t[0], 2), "ly": round(l[0], 2),
             "ty_units": t[1], "ly_units": l[1],

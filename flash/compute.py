@@ -40,7 +40,7 @@ from typing import Dict, List, Optional
 from flash import customer as customer_mod
 from flash import fmt, merch, narrative, omni
 from flash.calendar import ly_holiday_aligned_date
-from flash.catalog import THRESHOLDS
+from flash.catalog import THRESHOLDS, reconcile_display
 from flash.focus import build_exceptions, build_focus, _slug
 
 D = dt.date
@@ -122,7 +122,7 @@ def build_flash(da, day: D, as_of: Optional[D] = None, version: int = 1,
     obj["slices"] = _slices(da, day, ly_override)
     obj["omni"] = _omni_block(da, day)
     obj["customer"] = _customer_block(da, day)
-    obj["merch"] = _merch_block(da, day)
+    obj["merch"] = _merch_block(da, day, full=(depth == "full"))
     obj["ecom"] = _ecom(da, day, as_of)
     obj["completeness"] = _completeness(da, day)
     obj["focus"] = build_focus(da, day, ly_override=ly_override)
@@ -131,6 +131,7 @@ def build_flash(da, day: D, as_of: Optional[D] = None, version: int = 1,
     obj["currency_note"] = da.currency_note()
 
     if depth == "full":
+        obj["personas"] = _personas(da, day, ly_override)
         obj["drill"] = _drill(da, day, ly_override)
         obj["stores"] = _store_blocks(da, day)
         obj["ranks"] = {k: da.rank_stores(day, kpi=k, n=10) for k in RANK_KPIS}
@@ -319,6 +320,16 @@ def _slices(da, day: D, ly_override) -> Dict[str, List[dict]]:
                               {"district_id": d["district_id"]},
                               d["name"], d["district_id"], region=d["region"])
                        for d in da.districts()]
+    # Make the DISPLAYED parts sum to the displayed whole. Each slice is
+    # rounded to cents independently, so five of them can miss their own total
+    # by a penny; the residual lands on the largest slice. The underlying
+    # figures are unchanged — this is BR-11 as the reader can check it, not
+    # only as the database knows it.
+    total = da.net_sales(day)
+    store_total = da.net_sales(day, channel="STORE")
+    for dim in ("channel", "region", "affiliate", "brand"):
+        reconcile_display(out[dim], "net_sales", total)
+    reconcile_display(out["district"], "net_sales", store_total)
     return out
 
 
@@ -406,7 +417,7 @@ def _customer_block(da, day: D, **scope) -> Dict[str, object]:
     }
 
 
-def _merch_block(da, day: D, **scope) -> Dict[str, object]:
+def _merch_block(da, day: D, full: bool = False, **scope) -> Dict[str, object]:
     cats = merch.category_day(da, day, **scope)
     movers = merch.sku_movers(da, day, n=10, **scope)
     out = {
@@ -423,6 +434,15 @@ def _merch_block(da, day: D, **scope) -> Dict[str, object]:
             for c in cats["categories"] if (c["comp_pct"] or 0) < 0}
     else:
         out["slide_runs"] = {}
+    out["category_skus"] = {}
+    if full and cats.get("available"):
+        # Every SKU in every category, ranked by contribution — the leaf of the
+        # drill path. Only at full depth: 120 SKUs a day across 60 days would
+        # triple the archive for pages that are not generated.
+        for c in cats["categories"]:
+            mv = merch.sku_movers(da, day, n=10 ** 6, category=c["category"],
+                                  **scope)
+            out["category_skus"][c["category"]] = mv["top"]
     return out
 
 
@@ -508,6 +528,176 @@ def _drill(da, day: D, ly_override) -> Dict[str, object]:
         "reconciliation_note": "Every level's children sum to it, to the cent "
                                "(BR-11). The figures below are the same catalog "
                                "calls the headline uses, scoped down.",
+    }
+
+
+# =========================================================================
+# Personas — the owner's scoping matrix, as data (BR-18)
+# =========================================================================
+#
+# Every persona view renders from THIS object. The scope differs; the numbers
+# cannot. A figure that appears on the Corporate page and the Region page is
+# the same catalog call with a different filter, computed here once.
+
+PERSONA_MATRIX = {
+    "corporate": ("brand", "region", "affiliate", "doors"),
+    "brand": ("region", "affiliate", "district", "doors"),
+    "region": ("brand", "affiliate", "district", "doors"),
+    "affiliate": ("brand", "district", "doors"),
+    "field": ("district", "doors"),
+}
+PERSONA_LABELS = {
+    "corporate": "Corporate", "brand": "Brand", "region": "Region",
+    "affiliate": "Affiliate", "field": "Field Leadership",
+}
+
+
+def _persona_specs(da) -> List[dict]:
+    """The 13 landing pages, in a fixed order."""
+    out = [{"kind": "corporate", "key": "corporate",
+            "label": "Corporate", "scope": {}}]
+    for b in da.brands():
+        out.append({"kind": "brand", "key": b["brand_id"], "label": b["name"],
+                    "scope": {"brand_id": b["brand_id"]}})
+    for r in sorted(set(d["region"] for d in da.districts())):
+        out.append({"kind": "region", "key": r, "label": r,
+                    "scope": {"region": r}})
+    for a, name in (("US", "United States"), ("CA", "Canada")):
+        out.append({"kind": "affiliate", "key": a, "label": name,
+                    "scope": {"affiliate_id": a}})
+    out.append({"kind": "field", "key": "field", "label": "Field Leadership",
+                "scope": {}})
+    return out
+
+
+def _personas(da, day: D, ly_override) -> Dict[str, object]:
+    out = {}
+    for spec in _persona_specs(da):
+        scope = spec["scope"]
+        h = _headline(da, day, None, **scope)
+        rollups = {}
+        for dim in PERSONA_MATRIX[spec["kind"]]:
+            rollups[dim] = _persona_rollup(da, day, ly_override, dim, scope)
+        doors = da.rank_stores(day, kpi="net_sales", n=10, **scope)
+        out["%s/%s" % (spec["kind"], spec["key"])] = {
+            "kind": spec["kind"], "key": spec["key"], "label": spec["label"],
+            "persona_label": PERSONA_LABELS[spec["kind"]],
+            "scope": scope,
+            "scope_note": _scope_note(spec["kind"]),
+            "headline": h,
+            "display": _display_kpis(h),
+            "rollups": rollups,
+            "top_doors": doors["top"], "bottom_doors": doors["bottom"],
+            "unavailable_doors": doors["unavailable"],
+            "currency_note": da.currency_note(**scope),
+            "plan_status": da.plan_status(day, **scope),
+            "exceptions": _scoped_exceptions(da, day, scope),
+        }
+    return out
+
+
+def _scope_note(kind: str) -> str:
+    return {
+        "corporate": "Brand · Region · Affiliate · top doors",
+        "brand": "Region · Affiliate · Field Leadership · Doors",
+        "region": "Brand · Affiliate · Field Leadership · Districts · Doors",
+        "affiliate": "Brands · Field Leadership · Districts · Doors",
+        "field": "Districts · Doors",
+    }[kind]
+
+
+def _persona_rollup(da, day: D, ly_override, dim: str, scope: dict) -> List[dict]:
+    """One dimension of a persona's landing view, scoped to that persona."""
+    rows = []
+    if dim == "brand":
+        for b in da.brands():
+            merged = dict(scope)
+            merged["brand_id"] = b["brand_id"]
+            if not da.scope_ids(**merged):
+                continue
+            rows.append(_slice(da, day, ly_override, merged, b["name"],
+                               b["brand_id"]))
+        merged = dict(scope)
+        merged["channel"] = "ECOM"
+        if da.scope_ids(**merged):
+            rows.append(_slice(da, day, ly_override, merged,
+                               "E-commerce (multi-brand)", "ECOM"))
+    elif dim == "region":
+        for r in sorted(set(e["region"] for e in da._scope_entities(**scope))):
+            merged = dict(scope)
+            merged["region"] = r
+            rows.append(_slice(da, day, ly_override, merged, _slice_label(r), r))
+    elif dim == "affiliate":
+        for a, name in (("US", "United States"), ("CA", "Canada")):
+            merged = dict(scope)
+            merged["affiliate_id"] = a
+            if not da.scope_ids(**merged):
+                continue
+            rows.append(_slice(da, day, ly_override, merged, name, a))
+    elif dim == "district":
+        for d_ in da.districts():
+            merged = dict(scope)
+            merged["district_id"] = d_["district_id"]
+            if not da.scope_ids(**merged):
+                continue
+            rows.append(_slice(da, day, ly_override, merged, d_["name"],
+                               d_["district_id"], region=d_["region"]))
+    elif dim == "doors":
+        for e in da._scope_entities(**scope):
+            if e["channel"] != "STORE":
+                continue
+            rows.append(_slice(da, day, ly_override, {"entity_id": e["entity_id"]},
+                               e["name"], e["entity_id"], region=e["region"]))
+        rows.sort(key=lambda r: (-r["net_sales"], r["key"]))
+    return rows
+
+
+def _scoped_exceptions(da, day: D, scope: dict) -> List[dict]:
+    """Exceptions filtered to the persona's own doors. The list is built once
+    for the fleet; a persona sees the subset that belongs to it, never a
+    differently-computed one."""
+    ids = set(da.scope_ids(**scope))
+    out = []
+    for e in build_exceptions(da, day, omni, customer_mod, merch):
+        if not e["entities"] or set(e["entities"]) & ids:
+            out.append(e)
+    return out
+
+
+def _display_kpis(h) -> Dict[str, str]:
+    """The KPI headline row as display strings, for any scope."""
+    return {
+        "net_sales": fmt.money_compact(h["net_sales"]),
+        "net_sales_exact": fmt.money_exact(h["net_sales"]),
+        "comp_pct": fmt.pct(h["comp_pct"]),
+        "plan_attainment": fmt.pct_plain(h["plan_attainment"]),
+        "plan_gap": fmt.money_signed(h["plan_gap"]),
+        "transactions": fmt.count(h["transactions"]),
+        "txn_comp": fmt.pct(h["comp_transactions"]["pct"]),
+        "units": fmt.count(h["units"]),
+        "ast": fmt.money_plain(h["ast"]), "aus": fmt.money_plain(h["aus"]),
+        "upt": fmt.ratio(h["upt"]),
+        "traffic": fmt.count(h["traffic"]),
+        "traffic_pct": fmt.pct(h["traffic_pct_vs_ly"]),
+        "conversion": (fmt.pct_plain(h["conversion"], 2)
+                       if h["conversion_available"] else "unavailable"),
+        "conversion_bps": _bps(h["conversion_bps_vs_ly"]),
+        "new_customers": fmt.count(h["new_customers"]),
+        "new_customer_pct": fmt.pct_plain(h["new_customer_pct"]),
+        "new_customer_ast": fmt.money_plain(h["new_customer_ast"]),
+        "returns": fmt.money_compact(h["returns"]),
+        "returns_pct_of_gross": fmt.pct_plain(h["returns_pct_of_gross"]),
+        "returns_vs_ly": fmt.pct(h["returns_pct_vs_ly"]),
+        "discounts": fmt.money_compact(h["discounts"]),
+        "discounts_pct_of_gross": fmt.pct_plain(h["discounts_pct_of_gross"]),
+        "discounts_vs_ly": fmt.pct(h["discounts_pct_vs_ly"]),
+        "omni_penetration": fmt.pct_plain(h["omni_penetration"], 2),
+        "omni_penetration_bps": _bps(h["omni_penetration_bps_vs_ly"]),
+        "portfolio": fmt.count(h["portfolio"]),
+        "trading": fmt.count(h["trading"]),
+        "comp_trading": fmt.count(h["comp_trading"]),
+        "pct_trading": fmt.pct_plain(h["pct_trading"]),
+        "pct_comp_of_trading": fmt.pct_plain(h["pct_comp_of_trading"]),
     }
 
 

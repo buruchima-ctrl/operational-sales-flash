@@ -88,7 +88,7 @@ def build_focus(da, day: D, ly_override: Optional[D] = None) -> Dict[str, object
         receipts = _ranked_list(receipts)[:RECEIPTS_PER_REGION]
         entries.append(_entry(
             kind="region", key=reg["region"], label=reg["region"],
-            ty=reg["ty"], ly=reg["ly"], delta=reg["delta"],
+            ty=reg["ty"], ly=reg["ly"], delta=reg["delta_exact"],
             contribution=reg["contribution"],
             covers=[c["entity_id"] for c in reg["members"]],
             receipts=receipts, adverse=True))
@@ -128,11 +128,22 @@ def build_focus(da, day: D, ly_override: Optional[D] = None) -> Dict[str, object
         claimed.add(c["entity_id"])
 
     # --- 4. reconciliation (BR-6) ----------------------------------------
+    # The check runs on UNROUNDED deltas against the unrounded headline gap,
+    # because Σ round(x) and round(Σ x) differ by a cent often enough that a
+    # rounded check would fail on arithmetic rather than on a real overlap —
+    # and a rule that cries wolf gets deleted. The remainder is still computed
+    # by summing the entities nobody named, never by subtracting the named ones
+    # from the total, which would make the assertion tautological.
     remainder_ids = sorted(set(by_id) - claimed)
-    remainder = round(sum(by_id[i]["delta"] for i in remainder_ids), 2)
-    displayed = round(sum(e["delta"] for e in entries), 2)
-    _assert_reconciles(day, entries, remainder, remainder_ids, total_gap,
-                       displayed, headline)
+    remainder_raw = sum(by_id[i]["delta"] for i in remainder_ids)
+    displayed_raw = sum(e["delta_raw"] for e in entries)
+    _assert_reconciles(day, entries, round(remainder_raw, 2), remainder_ids,
+                       headline["gap_raw"], displayed_raw, headline)
+    # Display: the parts a reader can add up must add up. Any sub-cent
+    # rounding residual lands on "all other", which is where an unnamed
+    # fraction of a cent honestly belongs.
+    remainder = round(total_gap - sum(e["delta"] for e in entries), 2)
+    display_rounding = round(remainder - round(remainder_raw, 2), 2)
 
     # --- 5. late-poster escalation (BR-3, §6.6) --------------------------
     escalations = []
@@ -157,6 +168,8 @@ def build_focus(da, day: D, ly_override: Optional[D] = None) -> Dict[str, object
         "adverse_mass": round(adverse_mass, 2),
         "entries": entries,
         "remainder": remainder,
+        "remainder_exact": round(remainder_raw, 2),
+        "display_rounding": display_rounding,
         "remainder_count": len(remainder_ids),
         "remainder_ids": remainder_ids,
         "escalations": escalations,
@@ -228,6 +241,7 @@ def _entry(kind, key, label, ty, ly, delta, contribution, covers, receipts,
         "ly": round(ly, 2),
         "delta": round(delta, 2),
         "contribution": contribution,
+        "delta_raw": delta,
         "pct": (ty / ly - 1.0) if ly else None,
         "covers": sorted(covers),
         "receipts": [{
@@ -254,6 +268,7 @@ def _region_rollup(contributions: List[dict]) -> List[dict]:
         b["contribution"] += c["contribution"]
         b["members"].append(c)
     for b in buckets.values():
+        b["delta_exact"] = b["delta"]
         b["ty"] = round(b["ty"], 2)
         b["ly"] = round(b["ly"], 2)
         b["delta"] = round(b["delta"], 2)
@@ -276,7 +291,7 @@ def _ranked_list(items):
 def _assert_reconciles(day, entries, remainder, remainder_ids, total_gap,
                        displayed, headline):
     """BR-6, named and actionable on failure (NFR-4)."""
-    check = round(displayed + remainder, 2)
+    check = displayed + sum(0.0 for _ in ()) + remainder
     if abs(check - total_gap) > CENT:
         lines = ["  %-10s %-34s %14s" % (e["kind"], e["label"],
                                          fmt.money_exact(e["delta"]))

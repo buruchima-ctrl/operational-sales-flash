@@ -517,6 +517,7 @@ class DataAccess(object):
         # error. Rounding is a display concern and happens on the way out.
         return {"ty": round(ty_raw, 2), "ly": round(ly_raw, 2),
                 "gap": round(ty_raw - ly_raw, 2),
+                "gap_raw": ty_raw - ly_raw,
                 "ty_raw": ty_raw, "ly_raw": ly_raw,
                 "members": members, "ly_date": ly_day.isoformat(),
                 "restated": self.restated(day)}
