@@ -37,30 +37,42 @@ from __future__ import annotations
 
 from html import escape as esc
 
-INK = "#1E2B38"
-INK_SOFT = "#55636F"
-PAPER = "#F7F5F0"
+# The site's tokens, restated as literals because an email cannot link a
+# stylesheet. Same hues, same meanings — gold input, blue presentation, green
+# calculated — so the digest and the site read as one product.
+INK = "#18242F"
+INK_2 = "#3D4C59"
+INK_SOFT = "#6B7885"
+FAINT = "#98A2AC"
+PAPER = "#F6F4EF"
 PANEL = "#FFFFFF"
-RULE = "#DCD7CC"
+PANEL_2 = "#FBFAF7"
+RULE = "#D8D2C7"
+HAIR = "#EAE6DD"
 GOLD = "#8A6416"
 BLUE = "#2C5F8A"
-CALC = "#2E7D5B"
+CALC = "#2A7355"
 BAD = "#A33A2A"
-GOOD = "#2E7D5B"
+GOOD = "#2A7355"
 
-DISPLAY = "'Avenir Next',Avenir,'Segoe UI',Helvetica,Arial,sans-serif"
-BODY = "Charter,'Iowan Old Style',Georgia,'Times New Roman',serif"
-DATA = "ui-monospace,'SF Mono',Menlo,Consolas,'Courier New',monospace"
+DISPLAY = ("'Avenir Next',Avenir,'Segoe UI',system-ui,'Helvetica Neue',"
+           "Helvetica,Arial,sans-serif")
+BODY = ("Charter,'Iowan Old Style','Palatino Linotype',Georgia,"
+        "'Times New Roman',serif")
+DATA = ("ui-monospace,'SF Mono',Menlo,Consolas,'DejaVu Sans Mono',"
+        "'Courier New',monospace")
 
 WRAP = ("margin:0;padding:0;width:100%%;background:%s;color:%s;"
         "-webkit-text-size-adjust:100%%;" % (PAPER, INK))
 CARD = ("width:100%%;max-width:600px;background:%s;border:1px solid %s;"
         "border-collapse:collapse;" % (PANEL, RULE))
-CELL = ("padding:16px 20px;font-family:%s;font-size:15px;line-height:1.5;"
+CELL = ("padding:18px 22px;font-family:%s;font-size:15.5px;line-height:1.6;"
         "color:%s;" % (BODY, INK))
-EYEBROW = ("font-family:%s;font-size:11px;letter-spacing:0.14em;"
-           "text-transform:uppercase;color:%s;" % (DISPLAY, INK_SOFT))
-NUM = "font-family:%s;font-variant-numeric:tabular-nums;color:%s;" % (DATA, INK)
+EYEBROW = ("font-family:%s;font-size:11px;letter-spacing:0.13em;"
+           "text-transform:uppercase;color:%s;font-weight:600;"
+           % (DISPLAY, INK_SOFT))
+NUM = ("font-family:%s;font-variant-numeric:tabular-nums lining-nums;color:%s;"
+       % (DATA, INK))
 
 UP = "../"          # the digest sits one level down, at email/<date>.html
 
@@ -128,18 +140,19 @@ def _preheader(obj) -> str:
 
 
 def _masthead(a, obj, d):
-    a('<tr><td style="%spadding-bottom:4px;border-bottom:2px solid %s;">'
-      % (CELL, RULE))
-    a('<div style="%s">%s · %s</div>'
-      % (EYEBROW, esc(obj["company"]), esc(obj["product"])))
-    a('<div style="font-family:%s;font-size:22px;font-weight:600;color:%s;'
-      'padding-top:6px;line-height:1.25;">%s</div>'
+    a('<tr><td style="%spadding-bottom:14px;border-bottom:2px solid %s;">'
+      % (CELL, INK))
+    a('<div style="%s">%s <span style="color:%s;">·</span> %s</div>'
+      % (EYEBROW, esc(obj["company"]), FAINT, esc(obj["product"])))
+    a('<div style="font-family:%s;font-size:25px;font-weight:600;color:%s;'
+      'padding-top:8px;line-height:1.12;letter-spacing:-0.015em;">%s</div>'
       % (DISPLAY, INK, esc(d["date_long"])))
-    a('<div style="font-family:%s;font-size:12px;color:%s;padding-top:4px;">'
-      '%s · fiscal %s · %s · generated for the morning of %s%s</div>'
-      % (DISPLAY, INK_SOFT, esc(d["week_label"]), esc(d["period_label"]),
+    a('<div style="font-family:%s;font-size:11.5px;color:%s;padding-top:7px;'
+      'line-height:1.5;">%s &nbsp;·&nbsp; fiscal %s &nbsp;·&nbsp; %s '
+      '&nbsp;·&nbsp; for the morning of %s%s</div>'
+      % (DATA, INK_SOFT, esc(d["week_label"]), esc(d["period_label"]),
          esc(d["quarter_label"]), esc(d["as_of"]),
-         " · VERSION %d (restatement)" % obj["version"]
+         " &nbsp;·&nbsp; VERSION %d (restatement)" % obj["version"]
          if obj["version"] > 1 else ""))
     a('</td></tr>')
 
@@ -159,13 +172,17 @@ def _headline(a, obj, d):
         # side cannot be narrower than their widest unbreakable token, and at
         # 20px a side the row exceeded a 375px phone. Email has no media
         # queries to stack it.
-        a('<td width="33%%" align="left" valign="top" style="padding:16px 10px '
-          '14px;border-bottom:1px solid %s;">' % RULE)
-        a('<div style="%s">%s</div>' % (EYEBROW, esc(label)))
-        a('<div style="%sfont-size:23px;font-weight:600;color:%s;padding-top:4px;">'
-          '%s</div>' % (NUM, colour, esc(value)))
-        a('<div style="font-family:%s;font-size:11px;color:%s;padding-top:3px;">'
-          '%s</div>' % (DATA, INK_SOFT, esc(sub)))
+        a('<td width="33%%" align="left" valign="top" style="padding:18px 10px '
+          '16px;border-bottom:1px solid %s;background:%s;">' % (RULE, PANEL_2))
+        a('<div style="font-family:%s;font-size:10px;letter-spacing:0.11em;'
+          'text-transform:uppercase;color:%s;font-weight:600;">%s</div>'
+          % (DISPLAY, INK_SOFT, esc(label)))
+        a('<div style="%sfont-size:25px;font-weight:600;color:%s;'
+          'padding-top:5px;line-height:1.1;letter-spacing:-0.02em;">%s</div>'
+          % (NUM, colour, esc(value)))
+        a('<div style="font-family:%s;font-size:10.5px;color:%s;'
+          'padding-top:4px;line-height:1.35;">%s</div>'
+          % (DATA, INK_SOFT, esc(sub)))
         a('</td>')
     a('</tr></table></td></tr>')
 
@@ -197,21 +214,23 @@ def _banners(a, obj, d):
 
 
 def _banner(a, colour, bg, title, body):
-    a('<tr><td style="padding:0 20px 12px;">')
+    a('<tr><td style="padding:0 22px 12px;">')
     a('<table role="presentation" width="100%%" cellpadding="0" cellspacing="0" '
-      'border="0" style="background:%s;border-left:3px solid %s;"><tr>'
-      '<td style="padding:10px 12px;">' % (bg, colour))
-    a('<div style="font-family:%s;font-size:11px;letter-spacing:0.1em;'
-      'text-transform:uppercase;color:%s;font-weight:600;">%s</div>'
-      % (DISPLAY, colour, esc(title)))
-    a('<div style="font-family:%s;font-size:13px;line-height:1.45;color:%s;'
-      'padding-top:4px;">%s</div>' % (BODY, INK, esc(body)))
+      'border="0" style="background:%s;border-left:3px solid %s;'
+      'border-top:1px solid %s;border-right:1px solid %s;'
+      'border-bottom:1px solid %s;"><tr>'
+      '<td style="padding:12px 14px;">' % (bg, colour, HAIR, HAIR, HAIR))
+    a('<div style="font-family:%s;font-size:10px;letter-spacing:0.11em;'
+      'text-transform:uppercase;color:%s;font-weight:700;'
+      'padding-bottom:4px;">%s</div>' % (DISPLAY, colour, esc(title)))
+    a('<div style="font-family:%s;font-size:13px;line-height:1.55;color:%s;">'
+      '%s</div>' % (BODY, INK_2, esc(body)))
     a('</td></tr></table></td></tr>')
 
 
 def _narrative(a, obj):
-    a('<tr><td style="%spadding-top:4px;padding-bottom:12px;">' % CELL)
-    a('<div style="font-size:15px;line-height:1.6;color:%s;">%s</div>'
+    a('<tr><td style="%spadding-top:16px;padding-bottom:14px;">' % CELL)
+    a('<div style="font-size:16px;line-height:1.65;color:%s;">%s</div>'
       % (INK, esc(obj["narrative"])))
     a('</td></tr>')
 
@@ -219,7 +238,7 @@ def _narrative(a, obj):
 def _exceptions(a, obj, d):
     _section(a, "Today's exceptions")
     items = d["exceptions"]
-    a('<tr><td style="padding:0 20px 8px;">')
+    a('<tr><td style="padding:0 22px 10px;">')
     if not items:
         a('<div style="font-family:%s;font-size:13px;color:%s;">Nothing cleared '
           'a threshold today.</div>' % (BODY, INK_SOFT))
@@ -274,7 +293,7 @@ def _plan(a, obj, d):
     ]
     _table(a, ["Grain", "Attainment", "Basis"], rows,
            aligns=["left", "right", "right"])
-    a('<tr><td style="padding:0 20px 12px;">')
+    a('<tr><td style="padding:0 22px 14px;">')
     a('<div style="font-family:%s;font-size:11px;color:%s;">%s of the day\'s '
       'sales sit inside a plan of any grain. A weekly plan is never spread '
       'across days (BR-19).</div>' % (DATA, INK_SOFT, esc(d["plan_coverage"])))
@@ -313,7 +332,7 @@ def _panels(a, obj, d):
 def _focus(a, obj, d):
     f = d["focus"]
     _section(a, "Focus — what moved the comp")
-    a('<tr><td style="padding:0 20px 6px;">')
+    a('<tr><td style="padding:0 22px 8px;">')
     a('<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
       'border="0">')
     for e in f["entries"]:
@@ -350,7 +369,7 @@ DEEP_LINKS = (
 
 def _links(a, obj, d):
     _section(a, "Open the site")
-    a('<tr><td style="padding:0 20px 12px;">')
+    a('<tr><td style="padding:0 22px 14px;">')
     target = obj.get("deep_links_date") or obj["date"]
     a('<div style="font-family:%s;font-size:13px;padding:4px 0;">'
       '<a href="%sday/%s.html" style="color:%s;text-decoration:underline;">'
@@ -375,7 +394,7 @@ def _links(a, obj, d):
 
 def _disclosures(a, obj):
     _section(a, "Disclosures")
-    a('<tr><td style="padding:0 20px 10px;">')
+    a('<tr><td style="padding:0 22px 12px;">')
     for item in obj["disclosures"]:
         a('<div style="font-family:%s;font-size:12px;line-height:1.5;color:%s;'
           'padding-bottom:6px;"><span style="font-family:%s;color:%s;">%s</span> '
@@ -385,7 +404,7 @@ def _disclosures(a, obj):
 
 def _method(a, obj):
     _section(a, "Formula key")
-    a('<tr><td style="padding:0 20px 20px;">')
+    a('<tr><td style="padding:0 22px 22px;">')
     for m in obj["method"]:
         a('<div style="font-family:%s;font-size:11px;line-height:1.5;color:%s;'
           'padding-bottom:4px;"><strong style="color:%s;">%s</strong> — %s</div>'
@@ -400,34 +419,38 @@ def _method(a, obj):
 # -- primitives -------------------------------------------------------------
 
 def _section(a, title):
-    a('<tr><td style="padding:14px 20px 6px;">')
-    a('<div style="%sborder-top:1px solid %s;padding-top:12px;">%s</div>'
-      % (EYEBROW, RULE, esc(title)))
+    """A section head with a short ink rule above it — the same device the site
+    uses, so the two surfaces are recognisably one product."""
+    a('<tr><td style="padding:20px 22px 8px;">')
+    a('<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+      'border="0"><tr><td style="height:2px;width:30px;background:'
+      + INK + ';font-size:0;line-height:0;">&nbsp;</td></tr></table>')
+    a('<div style="%spadding-top:10px;">%s</div>' % (EYEBROW, esc(title)))
     a('</td></tr>')
 
 
 def _table(a, headers, rows, aligns):
-    a('<tr><td style="padding:0 20px 12px;">')
+    a('<tr><td style="padding:0 22px 14px;">')
     a('<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
       'border="0" style="border-collapse:collapse;">')
     a('<tr>')
     for h, al in zip(headers, aligns):
-        a('<th align="%s" style="font-family:%s;font-size:10px;'
-          'letter-spacing:0.08em;text-transform:uppercase;color:%s;'
-          'font-weight:600;padding:0 0 5px;border-bottom:1px solid %s;">%s</th>'
-          % (al, DISPLAY, INK_SOFT, RULE, esc(h)))
+        a('<th align="%s" style="font-family:%s;font-size:9.5px;'
+          'letter-spacing:0.09em;text-transform:uppercase;color:%s;'
+          'font-weight:700;padding:0 0 6px;border-bottom:1.5px solid %s;">'
+          '%s</th>' % (al, DISPLAY, INK_SOFT, INK_2, esc(h)))
     a('</tr>')
     for row in rows:
         a('<tr>')
         for i, (cell, al) in enumerate(zip(row, aligns)):
             font = BODY if i == 0 else DATA
             size = "13px" if i == 0 else "12px"
-            colour = INK
+            colour = INK if i == 0 else INK_2
             if i > 0 and isinstance(cell, str) and cell.startswith("−"):
                 colour = BAD
             a('<td align="%s" style="font-family:%s;font-size:%s;color:%s;'
-              'font-variant-numeric:tabular-nums;padding:6px 0;'
+              'font-variant-numeric:tabular-nums lining-nums;padding:7px 0;'
               'border-bottom:1px solid %s;">%s</td>'
-              % (al, font, size, colour, RULE, esc(str(cell))))
+              % (al, font, size, colour, HAIR, esc(str(cell))))
         a('</tr>')
     a('</table></td></tr>')

@@ -1,4 +1,29 @@
-/* ========================================================================
+# -*- coding: utf-8 -*-
+"""The stylesheet — one file, one home, no external assets.
+
+Every page on the site links this and nothing else. Keeping it in its own
+module rather than buried in the renderer makes that literal: there is exactly
+one place a colour, a size or a rule can be changed, and a renderer that wants
+a new look has to come here rather than inline a style attribute.
+
+Three constraints shape every decision below:
+
+  * **No network.** No webfont, no CDN, no image. Every family falls back
+    through faces that ship with macOS, Windows and Linux, so the page renders
+    identically offline and on a reviewer's machine.
+  * **The portfolio's colour semantics are load-bearing**, not decoration.
+    Gold means an input the business asserted, blue a figure presented as
+    given, green something this system calculated. A colour is never chosen
+    because it looks nice in a place where it would say something untrue.
+  * **Deterministic output.** No random, no clock, no user-agent branching.
+
+Within those, this is a designed document rather than a styled one: a modular
+type scale, a four-pixel vertical rhythm, tabular figures everywhere a number
+can be compared to the number above it, and tables built for scanning down a
+column rather than for filling a page.
+"""
+
+CSS = """/* ========================================================================
    Lumière Ops Flash — the operational site.
    Tokens: gold = an INPUT the business asserted · blue = a PRESENTATION,
    a figure shown as given · green = a CALCULATION this system performed.
@@ -476,3 +501,4 @@ footer{
   .scroll{overflow:visible;border:none}
   a{color:var(--ink);border-bottom:none}
 }
+"""

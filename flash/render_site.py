@@ -37,6 +37,7 @@ from typing import Dict, List, Optional
 from flash import fmt
 from flash.catalog import reconcile_display
 from flash.focus import _slug
+from flash.style import CSS
 
 D = dt.date
 
@@ -61,212 +62,6 @@ OMNI_TITLES = {
     "OOFIS": "Order Online From In Store", "CR": "Click & Reserve",
     "BORIS": "Buy Online, Return In Store",
 }
-
-CSS = """/* Lumière Ops Flash — the operational site.
-   Design tokens (the portfolio's language):
-     --gold  an INPUT        something the business asserted (a plan, a date)
-     --blue  a PRESENTATION  a figure being shown, not derived here
-     --calc  a CALCULATION   something this system worked out
-   Avenir display / Charter body / monospace data. No webfonts: every stack
-   falls back through faces that ship with the OS, so the page renders offline
-   and identically on a reviewer's machine. */
-:root{
-  --paper:#F7F5F0; --panel:#FFFFFF; --ink:#1E2B38; --soft:#55636F;
-  --rule:#DCD7CC; --rule-soft:#EDEAE3;
-  --gold:#8A6416; --gold-bg:#FBF4E4;
-  --blue:#2C5F8A; --blue-bg:#EAF1F7;
-  --calc:#2E7D5B; --calc-bg:#E9F3EE;
-  --bad:#A33A2A; --bad-bg:#FBEDEA; --good:#2E7D5B; --warn:#8A6416;
-  --display:'Avenir Next',Avenir,'Segoe UI',Helvetica,Arial,sans-serif;
-  --body:Charter,'Iowan Old Style',Georgia,'Times New Roman',serif;
-  --data:ui-monospace,'SF Mono',Menlo,Consolas,'Courier New',monospace;
-}
-*{box-sizing:border-box}
-html{-webkit-text-size-adjust:100%}
-body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--body);
-  font-size:16px;line-height:1.55;}
-a{color:var(--blue);text-decoration:none;border-bottom:1px solid rgba(44,95,138,.35);}
-a:hover{border-bottom-color:var(--blue)}
-.wrap{max-width:1080px;margin:0 auto;padding:20px 16px 64px;}
-.wrap.narrow{max-width:780px}
-
-header.top{border-bottom:2px solid var(--ink);padding-bottom:12px;margin-bottom:16px;}
-.eyebrow{font-family:var(--display);font-size:11px;letter-spacing:.14em;
-  text-transform:uppercase;color:var(--soft);}
-h1{font-family:var(--display);font-size:29px;font-weight:600;margin:6px 0 0;
-  line-height:1.15;letter-spacing:-.01em;}
-.meta{font-family:var(--data);font-size:12px;color:var(--soft);margin-top:6px;}
-.crumbs{font-family:var(--display);font-size:12px;color:var(--soft);margin:0 0 14px;}
-.crumbs a{border-bottom:none}
-.crumbs span.sep{padding:0 6px;color:var(--rule)}
-
-h2{font-family:var(--display);font-size:11px;letter-spacing:.14em;
-  text-transform:uppercase;color:var(--soft);font-weight:600;
-  border-top:1px solid var(--rule);padding-top:12px;margin:26px 0 10px;}
-h3{font-family:var(--display);font-size:14px;font-weight:600;margin:16px 0 6px;}
-
-nav.personas{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 14px;}
-nav.personas a{font-family:var(--display);font-size:12px;padding:4px 9px;
-  border:1px solid var(--rule);background:var(--panel);border-bottom:1px solid var(--rule);}
-nav.personas a.on{border-color:var(--ink);color:var(--ink);font-weight:600}
-
-.tiles{display:flex;flex-wrap:wrap;gap:10px;margin:4px 0 16px;}
-.tile{flex:1 1 150px;background:var(--panel);border:1px solid var(--rule);
-  padding:10px 12px;}
-.tile .v{font-family:var(--data);font-size:23px;font-weight:600;line-height:1.15;
-  font-variant-numeric:tabular-nums;padding-top:2px;}
-.tile .s{font-family:var(--data);font-size:11px;color:var(--soft);padding-top:3px;}
-.tile.sm .v{font-size:18px}
-.bad{color:var(--bad)} .good{color:var(--good)} .calc{color:var(--calc)}
-.gold{color:var(--gold)} .blue{color:var(--blue)} .soft{color:var(--soft)}
-
-.band{border-left:3px solid var(--gold);background:var(--gold-bg);
-  padding:10px 12px;margin:0 0 10px;font-size:14px;}
-.band.alert{border-left-color:var(--bad);background:var(--bad-bg)}
-.band.note{border-left-color:var(--blue);background:var(--blue-bg)}
-.band.calcband{border-left-color:var(--calc);background:var(--calc-bg)}
-.band .t{font-family:var(--display);font-size:11px;letter-spacing:.1em;
-  text-transform:uppercase;font-weight:700;display:block;}
-.band .t.g{color:var(--gold)} .band .t.r{color:var(--bad)}
-.band .t.b{color:var(--blue)} .band .t.c{color:var(--calc)}
-
-.narr{font-size:17px;line-height:1.6;margin:2px 0 14px;}
-
-.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;}
-table{width:100%;border-collapse:collapse;font-size:14px;background:var(--panel);}
-th{font-family:var(--display);font-size:10px;letter-spacing:.08em;
-  text-transform:uppercase;color:var(--soft);font-weight:600;text-align:right;
-  padding:6px 8px;border-bottom:1px solid var(--rule);white-space:nowrap;}
-th:first-child{text-align:left}
-td{font-family:var(--data);font-variant-numeric:tabular-nums;text-align:right;
-  padding:6px 8px;border-bottom:1px solid var(--rule-soft);white-space:nowrap;}
-td:first-child{font-family:var(--body);text-align:left;white-space:normal}
-tr:last-child td{border-bottom:1px solid var(--rule)}
-tr.tot td{font-weight:700;border-top:1px solid var(--ink);background:var(--panel)}
-th[title],td[title],.hint{cursor:help;border-bottom-style:dashed}
-table.tier th.grp{text-align:center;border-bottom:1px solid var(--rule-soft);
-  color:var(--ink);letter-spacing:.06em}
-
-ul.focus,ul.exc{list-style:none;margin:0;padding:0;}
-ul.focus li{padding:8px 0;border-bottom:1px solid var(--rule-soft);font-size:15px;}
-ul.focus .mk{font-weight:700;padding-right:4px;}
-ul.focus .rc{display:block;font-family:var(--data);font-size:12px;
-  color:var(--soft);padding-left:18px;}
-ul.exc li{padding:9px 0;border-bottom:1px solid var(--rule-soft);}
-ul.exc .h{font-family:var(--display);font-size:14px;font-weight:600;}
-ul.exc .d{font-size:13px;color:var(--soft);line-height:1.45;}
-ul.exc .r{font-family:var(--data);font-size:10px;color:var(--gold);
-  border:1px solid var(--gold);padding:0 3px;margin-left:6px;}
-.recon{font-family:var(--data);font-size:12px;color:var(--calc);padding-top:8px;}
-
-.funnel{display:flex;flex-wrap:wrap;gap:8px;align-items:stretch;margin:0 0 12px;}
-.funnel .f{flex:1 1 120px;background:var(--panel);border:1px solid var(--rule);
-  padding:8px 10px;}
-.funnel .f .n{font-family:var(--data);font-size:20px;font-weight:600}
-.funnel .f .l{font-family:var(--display);font-size:10px;letter-spacing:.1em;
-  text-transform:uppercase;color:var(--soft)}
-.funnel .arrow{align-self:center;color:var(--rule);font-size:18px}
-
-.keyrow{font-family:var(--data);font-size:11px;color:var(--soft);margin:0 0 10px}
-.keyrow i{font-style:normal;padding-right:10px}
-.tri{font-style:normal}
-.tri.up{color:var(--good)} .tri.dn{color:var(--bad)} .tri.mid{color:var(--soft)}
-
-.grid2{display:flex;flex-wrap:wrap;gap:14px}
-.grid2 > *{flex:1 1 320px;min-width:0}
-.cards{display:flex;flex-wrap:wrap;gap:10px;}
-.card{flex:1 1 240px;background:var(--panel);border:1px solid var(--rule);
-  padding:11px 13px;font-size:13px;}
-.card .n{font-family:var(--display);font-size:11px;letter-spacing:.1em;
-  text-transform:uppercase;color:var(--soft);font-weight:600;}
-.card .h{font-family:var(--display);font-size:15px;font-weight:600;margin:2px 0 4px;}
-
-svg.viz{display:block;max-width:100%;height:auto;background:var(--panel);
-  border:1px solid var(--rule);}
-.vizrow{display:flex;flex-wrap:wrap;gap:12px}
-.vizrow figure{margin:0;flex:1 1 260px}
-figcaption{font-family:var(--data);font-size:11px;color:var(--soft);padding-top:5px}
-.legendkeys{font-family:var(--data);font-size:11px;color:var(--soft);padding-top:4px}
-.legendkeys i{font-style:normal;padding-right:9px;white-space:nowrap}
-.sw{display:inline-block;width:9px;height:9px;margin-right:3px;vertical-align:baseline}
-
-details.rank{background:var(--panel);border:1px solid var(--rule);padding:8px 12px;
-  margin-top:8px;font-size:13px}
-details.rank summary{font-family:var(--display);font-size:12px;cursor:pointer;
-  color:var(--blue)}
-
-/* KPI tree */
-.tree{display:flex;flex-wrap:wrap;gap:10px;align-items:stretch;margin:6px 0 12px}
-.tree .node{flex:1 1 165px;background:var(--panel);border:1px solid var(--rule);
-  padding:9px 11px}
-.tree .node.op{flex:0 0 26px;display:flex;align-items:center;justify-content:center;
-  border:none;background:none;font-family:var(--data);font-size:20px;color:var(--soft)}
-.tree .node .l{font-family:var(--display);font-size:10px;letter-spacing:.1em;
-  text-transform:uppercase;color:var(--soft)}
-.tree .node .v{font-family:var(--data);font-size:19px;font-weight:600}
-.tree .node .c{font-family:var(--data);font-size:11px}
-.calcbox{background:var(--calc-bg);border:1px solid var(--calc);padding:12px 14px;
-  margin:10px 0}
-.calcbox label{display:block;font-family:var(--display);font-size:11px;
-  letter-spacing:.08em;text-transform:uppercase;color:var(--soft);margin-top:8px}
-.calcbox input[type=range]{width:100%;max-width:340px}
-.calcbox output{font-family:var(--data);font-variant-numeric:tabular-nums}
-.calcbox .out{font-family:var(--data);font-size:22px;font-weight:600;padding-top:8px}
-.calcbox .chk{font-family:var(--data);font-size:11px;color:var(--calc);padding-top:6px}
-.calcbox button{font-family:var(--display);font-size:12px;padding:4px 10px;
-  border:1px solid var(--calc);background:var(--panel);color:var(--calc);cursor:pointer}
-
-/* hourly bars */
-.hours{display:flex;align-items:flex-end;gap:4px;height:150px;padding:8px;
-  background:var(--panel);border:1px solid var(--rule)}
-.hours .h{flex:1 1 0;display:flex;flex-direction:column;justify-content:flex-end;
-  align-items:center;height:100%}
-.hours .h .b{width:100%;background:var(--blue);min-height:1px}
-.hours .h .b2{width:100%;background:var(--gold);min-height:1px;opacity:.65}
-.hours .h .t{font-family:var(--data);font-size:9px;color:var(--soft);padding-top:3px}
-
-/* fiscal-week grid — the archive's navigation */
-.periodhead{font-family:var(--display);font-size:12px;letter-spacing:.1em;
-  text-transform:uppercase;color:var(--gold);font-weight:700;margin:22px 0 6px;}
-table.cal{table-layout:fixed;font-size:13px;}
-table.cal th{text-align:center}
-table.cal th.wk{text-align:left;width:110px}
-table.cal td{text-align:left;vertical-align:top;padding:0;white-space:normal;
-  border:1px solid var(--rule-soft);height:70px;}
-table.cal td.wk{font-family:var(--data);font-size:11px;color:var(--soft);
-  padding:6px 8px;border-left:none;vertical-align:middle;}
-.cell{display:block;padding:6px 7px;height:100%;border-bottom:none;}
-a.cell:hover{background:var(--blue-bg);border-bottom:none}
-.cell .dnum{font-family:var(--data);font-size:11px;color:var(--soft);}
-.cell .amt{font-family:var(--data);font-size:14px;font-weight:600;
-  font-variant-numeric:tabular-nums;display:block;padding-top:2px;color:var(--ink);}
-.cell .cmp{font-family:var(--data);font-size:11px;display:block;}
-.cell.empty{background:repeating-linear-gradient(135deg,transparent,
-  transparent 5px,var(--rule-soft) 5px,var(--rule-soft) 6px);}
-.flag{display:inline-block;font-family:var(--display);font-size:9px;
-  letter-spacing:.06em;text-transform:uppercase;padding:0 3px;margin-top:2px;
-  border:1px solid var(--gold);color:var(--gold);}
-.flag.r{border-color:var(--bad);color:var(--bad)}
-.flag.b{border-color:var(--blue);color:var(--blue)}
-.flag.c{border-color:var(--calc);color:var(--calc)}
-
-.disc{font-size:13px;line-height:1.5;margin:0 0 7px;}
-.disc b{font-family:var(--data);color:var(--gold);font-weight:600;
-  font-size:12px;padding-right:3px;}
-.key{font-family:var(--data);font-size:12px;line-height:1.5;color:var(--soft);
-  margin:0 0 5px;}
-.key b{color:var(--ink);font-weight:600}
-.legend{font-family:var(--data);font-size:11px;color:var(--soft);
-  border-top:1px solid var(--rule);padding-top:8px;margin-top:8px;}
-footer{font-family:var(--data);font-size:11px;color:var(--soft);
-  border-top:1px solid var(--rule);margin-top:28px;padding-top:10px;line-height:1.6}
-.pager{display:flex;justify-content:space-between;font-family:var(--display);
-  font-size:13px;margin-top:18px}
-@media (max-width:640px){
-  h1{font-size:23px} .wrap{padding:14px 11px 48px}
-  .tile{flex:1 1 132px} .tile .v{font-size:19px}
-}
-"""
 
 def _page(title: str, body: str, depth: int = 0, wrap_class: str = "",
           script: str = "") -> str:
@@ -549,8 +344,15 @@ def _plan_grain_block(obj, d) -> str:
 # Static SVG — no library, no script, no external asset (D13)
 # =========================================================================
 
-PALETTE = ("#2C5F8A", "#8A6416", "#2E7D5B", "#A33A2A", "#55636F",
-           "#7A96B0", "#B79A5E", "#7FB39B", "#C98878", "#9AA5AE")
+# A sequence, not a rainbow: the three token hues lead, then a muted neutral,
+# then tints of the same three. Adjacent segments never share a value, so the
+# separator stroke is doing contrast work rather than carrying it alone.
+PALETTE = ("#2C5F8A", "#8A6416", "#2A7355", "#6B7885", "#A33A2A",
+           "#6E93B4", "#BFA469", "#6FA98D", "#A8B2BB", "#C99184")
+INK_SVG = "#18242F"
+SOFT_SVG = "#6B7885"
+HAIR_SVG = "#EAE6DD"
+PANEL_SVG = "#FFFFFF"
 
 
 def _fmt_n(v: float) -> str:
@@ -575,41 +377,56 @@ def _arc_path(cx, cy, r_out, r_in, a0, a1) -> str:
                _fmt_n(r_in), large, _fmt_n(x3), _fmt_n(y3)))
 
 
+DONUT_FONT = ("ui-monospace,'SF Mono',Menlo,Consolas,monospace")
+
+
 def _donut(rings, centre_top: str = "", centre_sub: str = "",
-           size: int = 190) -> str:
+           size: int = 210) -> str:
     """A double-layer donut: `rings` is a list of ring definitions, outermost
-    first, each a list of (label, value). Segments below 1% still get a sliver
-    so a reader can see the category exists."""
+    first, each a list of (label, value).
+
+    Two deliberate choices. Segments are separated by a hairline in the panel
+    colour rather than by hoping adjacent hues differ enough — a two-percent
+    slice next to a forty-percent one has to be visible as its own thing. And
+    the inner ring is thinner than the outer, so the eye reads the outer as the
+    primary cut instead of treating the two as equals."""
     cx = cy = size / 2.0
     o = ['<svg class="viz" viewBox="0 0 %d %d" width="%d" height="%d" '
-         'role="img" aria-label="%s">' % (size, size, size, size, esc(centre_top))]
-    band = 26.0
-    gap = 5.0
-    r_out = size / 2.0 - 6.0
-    for ring in rings:
+         'role="img" aria-label="%s">' % (size, size, size, size,
+                                          esc(centre_top or "donut"))]
+    bands = (30.0, 20.0, 15.0)
+    gap = 6.0
+    r_out = size / 2.0 - 7.0
+    for depth_i, ring in enumerate(rings):
+        band = bands[min(depth_i, len(bands) - 1)]
         total = sum(max(0.0, v) for _l, v in ring) or 1.0
-        a = 0.0
+        ang = 0.0
         for i, (label, value) in enumerate(ring):
             frac = max(0.0, value) / total
             sweep = frac * 360.0
             if sweep <= 0.0:
                 continue
-            colour = PALETTE[i % len(PALETTE)]
-            o.append('<path d="%s" fill="%s"><title>%s — %s</title></path>'
-                     % (_arc_path(cx, cy, r_out, r_out - band, a, a + sweep),
-                        colour, esc(label), esc(fmt.pct_plain(frac))))
-            a += sweep
+            o.append('<path d="%s" fill="%s" stroke="%s" stroke-width="1"'
+                     ' stroke-linejoin="round"><title>%s — %s</title></path>'
+                     % (_arc_path(cx, cy, r_out, r_out - band, ang, ang + sweep),
+                        PALETTE[i % len(PALETTE)], PANEL_SVG,
+                        esc(label), esc(fmt.pct_plain(frac))))
+            ang += sweep
         r_out -= (band + gap)
+    inner = max(8.0, r_out)
+    o.append('<circle cx="%s" cy="%s" r="%s" fill="%s"/>'
+             % (_fmt_n(cx), _fmt_n(cy), _fmt_n(inner), PANEL_SVG))
     if centre_top:
-        o.append('<text x="%s" y="%s" text-anchor="middle" '
-                 'font-family="ui-monospace,Menlo,monospace" font-size="15" '
-                 'font-weight="600" fill="#1E2B38">%s</text>'
-                 % (_fmt_n(cx), _fmt_n(cy + 1), esc(centre_top)))
+        o.append('<text x="%s" y="%s" text-anchor="middle" font-family="%s" '
+                 'font-size="16" font-weight="600" fill="%s" '
+                 'letter-spacing="-0.3">%s</text>'
+                 % (_fmt_n(cx), _fmt_n(cy + 2), DONUT_FONT, INK_SVG,
+                    esc(centre_top)))
     if centre_sub:
-        o.append('<text x="%s" y="%s" text-anchor="middle" '
-                 'font-family="ui-monospace,Menlo,monospace" font-size="9" '
-                 'fill="#55636F">%s</text>' % (_fmt_n(cx), _fmt_n(cy + 15),
-                                               esc(centre_sub)))
+        o.append('<text x="%s" y="%s" text-anchor="middle" font-family="%s" '
+                 'font-size="8.5" fill="%s" letter-spacing="1.1">%s</text>'
+                 % (_fmt_n(cx), _fmt_n(cy + 17), DONUT_FONT, SOFT_SVG,
+                    esc(centre_sub.upper())))
     o.append('</svg>')
     return "".join(o)
 
@@ -624,33 +441,65 @@ def _donut_keys(ring) -> str:
     return '<div class="legendkeys">%s</div>' % "".join(parts)
 
 
-def _trend(series, labels=None, w: int = 340, h: int = 96,
+def _trend(series, labels=None, w: int = 348, h: int = 116,
            colour: str = "#2C5F8A", second=None, second_colour: str = "#8A6416",
            title: str = "") -> str:
     """A trend line, optionally with a second independently-scaled series (the
-    deck's traffic-vs-conversion chart). Each series carries its own axis
-    because they are different units — sharing one would be a lie of shape."""
+    deck's traffic-vs-conversion chart).
+
+    Each series keeps its own axis because they are different units; sharing
+    one would be a lie of shape. The first series gets a soft area fill so the
+    eye reads it as the subject and the second as the comparison, and both get
+    an endpoint dot because the last value is the one anyone actually looks
+    for."""
     if not series:
         return ""
-    pad = 8.0
-    def poly(vals, col):
+    pad_x, pad_t, pad_b = 10.0, 12.0, 14.0
+
+    def geometry(vals):
         lo, hi = min(vals), max(vals)
         span = (hi - lo) or (abs(hi) or 1.0)
-        step = (w - 2 * pad) / float(max(1, len(vals) - 1))
+        step = (w - 2 * pad_x) / float(max(1, len(vals) - 1))
         pts = []
         for i, v in enumerate(vals):
-            x = pad + i * step
-            y = h - pad - ((v - lo) / span) * (h - 2 * pad)
-            pts.append("%s,%s" % (_fmt_n(x), _fmt_n(y)))
-        return ('<polyline fill="none" stroke="%s" stroke-width="1.8" '
-                'points="%s"/>' % (col, " ".join(pts)))
+            x = pad_x + i * step
+            y = h - pad_b - ((v - lo) / span) * (h - pad_t - pad_b)
+            pts.append((x, y))
+        return pts
+
     o = ['<svg class="viz" viewBox="0 0 %d %d" width="%d" height="%d" '
          'role="img" aria-label="%s">' % (w, h, w, h, esc(title or "trend"))]
-    o.append('<line x1="%s" y1="%s" x2="%s" y2="%s" stroke="#EDEAE3"/>'
-             % (_fmt_n(pad), _fmt_n(h - pad), _fmt_n(w - pad), _fmt_n(h - pad)))
-    o.append(poly(series, colour))
+    # three faint gridlines, so a slope can be read as a magnitude
+    for frac in (0.25, 0.5, 0.75):
+        y = pad_t + (h - pad_t - pad_b) * frac
+        o.append('<line x1="%s" y1="%s" x2="%s" y2="%s" stroke="%s" '
+                 'stroke-width="1"/>' % (_fmt_n(pad_x), _fmt_n(y),
+                                         _fmt_n(w - pad_x), _fmt_n(y), HAIR_SVG))
+    o.append('<line x1="%s" y1="%s" x2="%s" y2="%s" stroke="%s" '
+             'stroke-width="1"/>' % (_fmt_n(pad_x), _fmt_n(h - pad_b),
+                                     _fmt_n(w - pad_x), _fmt_n(h - pad_b),
+                                     "#D8D2C7"))
+    main = geometry(series)
+    area = ("M%s %s " % (_fmt_n(main[0][0]), _fmt_n(h - pad_b))
+            + " ".join("L%s %s" % (_fmt_n(x), _fmt_n(y)) for x, y in main)
+            + " L%s %s Z" % (_fmt_n(main[-1][0]), _fmt_n(h - pad_b)))
+    o.append('<path d="%s" fill="%s" opacity="0.10"/>' % (area, colour))
+    o.append('<polyline fill="none" stroke="%s" stroke-width="2" '
+             'stroke-linecap="round" stroke-linejoin="round" points="%s"/>'
+             % (colour, " ".join("%s,%s" % (_fmt_n(x), _fmt_n(y))
+                                 for x, y in main)))
+    o.append('<circle cx="%s" cy="%s" r="3" fill="%s" stroke="%s" '
+             'stroke-width="1.5"/>' % (_fmt_n(main[-1][0]), _fmt_n(main[-1][1]),
+                                       PANEL_SVG, colour))
     if second:
-        o.append(poly(second, second_colour))
+        sec = geometry(second)
+        o.append('<polyline fill="none" stroke="%s" stroke-width="1.6" '
+                 'stroke-dasharray="4 3" stroke-linecap="round" points="%s"/>'
+                 % (second_colour, " ".join("%s,%s" % (_fmt_n(x), _fmt_n(y))
+                                            for x, y in sec)))
+        o.append('<circle cx="%s" cy="%s" r="3" fill="%s" stroke="%s" '
+                 'stroke-width="1.5"/>' % (_fmt_n(sec[-1][0]), _fmt_n(sec[-1][1]),
+                                           PANEL_SVG, second_colour))
     o.append('</svg>')
     return "".join(o)
 
