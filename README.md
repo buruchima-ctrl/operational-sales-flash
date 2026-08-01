@@ -31,7 +31,7 @@ python3 run_flash.py --companion # rebuild the summary companion only
 Or check the whole thing in one command:
 
 ```bash
-python3 run_flash.py --check # seed + storyline assertions + 273 tests + determinism
+python3 run_flash.py --check # seed + storyline assertions + 298 tests + determinism
 ```
 
 The demo clock is fixed: **today is 2026-07-24** and the latest complete day is
@@ -47,6 +47,8 @@ year as it does today, and two builds produce byte-identical output.
 | `/field/2026-07-23.html` | Field Leadership: districts and doors, coaching-first |
 | `/day/2026-07-23.html` | the day flash: headline, exceptions, focus, every panel |
 | `/email/2026-07-23.html` | the morning digest as it lands on a phone |
+| `/store-manager/2026-07-23.html` | Store Manager: the door picker, with the filter bar |
+| `/store-manager/district/MW-1/2026-07-23.html` | one filtered view — the doors in a single district |
 | `/store/LB-015/tree/2026-07-23.html` | the KPI tree and the what-if calculator |
 | `/extracts/2026-07-23-doors.csv` | door × brand × the full KPI set |
 | `/today` | generated live from the database, not read from the archive |
@@ -125,6 +127,50 @@ re-derive several of them a second way.
   variation is a stable hash of (entity, date, tag). Two builds produce the same
   database and the same `render/` tree, bit for bit.
 
+### Stores and e-commerce, on every landing
+
+Every persona landing carries a **channel section**, scoped to whoever is
+reading it: net sales, mix, comp, plan at each brand's native grain, and the
+door metrics that only stores have.
+
+**Omni is a penetration column inside each channel, never a third row.** A
+BOPIS order is money already sitting in e-commerce demand; its pickup upsell is
+money already sitting in the store's takings. An omni row would double-count
+the headline in the one table a reader is most likely to add up, so each
+attributed family is mapped to the channel it already lives in and shown as a
+share of it (BR-9). A regression test sweeps every channel table in the tree
+and fails if one ever grows a third channel.
+
+**Traffic and conversion are labeled FSS-only rather than printed as zero.**
+E-commerce has no door traffic, and a row of dashes reads like a bad day
+instead of a category error (BR-15).
+
+**Channel rows sum to the section total to the cent**, stated on the page
+rather than promised (BR-11), and for every scope but one that total is the
+page's own headline.
+
+That one exception is **brand**. E-commerce is a single storefront per
+affiliate selling all three brands, so it carries no `brand_id` and a brand
+scope filters it away entirely — but a brand plainly has online trade, and it
+is recorded in the product joined to the sales line. So a brand's e-commerce
+row is **attributed through the SKU**, using the same join the category tables
+use, which keeps brand a derived dimension with one home (BR-5).
+
+The attributed row carries what the grain supports and refuses the rest. Sales,
+units and a day-aligned comp attribute exactly. Plan is set per entity, traffic
+is a door-counter reading, and `omni_order` has no SKU column — so those three
+read *not attributable* rather than zero. Brand is also the one scope where the
+channel total is not the page headline, so the reconciliation says which figure
+is which instead of asserting an equality it does not have: the stores row
+alone is the headline, and the attributed row is trade that headline never
+counted.
+
+| Scope | Channels shown |
+|---|---|
+| Corporate, Field Leadership, Affiliate | Stores and e-commerce, summing to the headline |
+| Brand | Stores, plus e-commerce attributed by SKU — total exceeds the stores-only headline, and says so |
+| Region, District, Door | Stores only, with the absence disclosed and the door's own online touch pointed at the omni section |
+
 ### The sixth persona: Store Manager
 
 Five personas have one landing each because there is one Corporate and six
@@ -163,6 +209,42 @@ no plan at all — its doors would never surface. A door's own form is something
 every door has.
 
 There is deliberately **no per-door digest**. The landing is the experience.
+
+#### Narrowing the door picker
+
+Twenty-nine doors is a list; a fleet is a haystack. So every level above the
+door carries a **pre-rendered filter view** — brand (3), region (6), affiliate
+(2), district (11) — reachable from a filter bar on the entry page.
+
+It is **anchors and files, no JavaScript**, the same pattern as the rank KPI
+selector: 22 views per full-depth day, one file each. A picker that stops
+working when a script fails is a picker for a demo, and the what-if calculator
+remains the only script in the product. The cost is 308 files; the return is a
+filter that works with scripting off, from `file://`, and in a printout.
+
+The bar appears on the unfiltered entry and on every view, always the same
+values in the same order, so a reader who has narrowed can see what else they
+could have picked and get back to every door in one click. Each view states its
+filter in words, and states what the filter does *not* do: it selects **which
+doors are listed**, and recomputes none of them — every figure is the same
+computed object the day flash and the extract read (BR-18).
+
+The tests re-derive each view's expected door set from the `stores` table
+rather than believing the page's own claim about itself.
+
+**Site-only, on purpose.** The companion sits at 615 files against a
+thousand-file ceiling; 308 filter views would spend a third of the remaining
+headroom on a picker over a list its readers can already see whole. So the
+companion keeps the unfiltered entry, and its filter links cross to the
+complete site under the same sanctioned-origin rule every other outbound link
+follows — named in the companion's own disclosure alongside the door, district,
+hourly, KPI-tree and SKU pages.
+
+> **When access rights arrive** — out of scope for v1, which has no auth — this
+> filter becomes the persona and access boundary rather than a convenience: a
+> district manager would land on their district's view and never see the
+> unfiltered entry. The views are already scoped per dimension, so the change
+> is who gets which URL, not what the pages compute.
 
 ### Getting around a long page
 
@@ -313,8 +395,8 @@ clickable inside the full-depth window.
 
 | | files | what it carries |
 |---|---:|---|
-| `render/site/` | 2,059 | everything — 60 day flashes, digests, persona landings, districts, doors, hourly views, KPI trees, category and SKU pages, omni panels, rank tables, extracts |
-| `render/companion/` | 601 | the summary tier only — day flashes, digests, the five persona landings, omni / customer / merchandise / category / rank panels, extracts, index |
+| `render/site/` | 2,381 | everything — 60 day flashes, digests, persona landings, the door-filter views, districts, doors, hourly views, KPI trees, category and SKU pages, omni panels, rank tables, extracts |
+| `render/companion/` | 615 | the summary tier only — day flashes, digests, the five persona landings, the unfiltered door picker, omni / customer / merchandise / category / rank panels, extracts, index |
 
 The companion exists for a host that caps at a thousand files. It renders from
 the **same archived objects** the complete site renders from, so there is no
@@ -367,13 +449,13 @@ the two cannot drift apart.
 Seeding the model — roughly 2.5 fiscal years of daily facts, plus SKU, hourly,
 omni and customer grain across a 14-week detail window — takes about three
 seconds including 49 storyline assertions. Computing 60 days and rendering both
-targets takes about ten. Every artefact is byte-identical on a rebuild.
+targets takes about thirteen. Every artefact is byte-identical on a rebuild.
 
 ```
 python3 seed.py                                ~3s    49 assertions
-python3 run_flash.py --all                    ~10s    2,660 files, 35 MB
-python3 run_flash.py --companion               ~1s      601 files, 12 MB
-python3 -m unittest discover -s tests -t .     ~13s    273 tests
+python3 run_flash.py --all                    ~13s    2,996 files, 45 MB
+python3 run_flash.py --companion               ~1s      615 files, 14 MB
+python3 -m unittest discover -s tests -t .     ~15s    298 tests
 ```
 
 ---
