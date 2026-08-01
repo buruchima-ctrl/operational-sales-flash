@@ -446,17 +446,25 @@ def _channel_section(cb) -> str:
     rows = []
     for r in cb["rows"]:
         fss = r["traffic_applies"]
+        att = r.get("attributed")
+        label = r["label"] + (" (attributed by SKU)" if att else "")
+        posted = ("%d storefront%s" % (r["open_entities"],
+                                       "" if r["open_entities"] == 1 else "s")
+                  if att else "%d/%d" % (r["reported_entities"],
+                                         r["open_entities"]))
         rows.append((
-            r["label"], "%d/%d" % (r["reported_entities"], r["open_entities"]),
+            label, posted,
             fmt.money_compact(r["net_sales"]), fmt.pct_plain(r["mix_pct"]),
             ("raw", "%s %s" % (_tri(r["comp_pct"]), esc(fmt.pct(r["comp_pct"])))),
-            fmt.pct_plain(r["plan_attainment"]),
-            "/".join(r["plan_grain_mix"]) or "no plan",
+            "no entity plan" if att else fmt.pct_plain(r["plan_attainment"]),
+            "not attributable" if att else (
+                "/".join(r["plan_grain_mix"]) or "no plan"),
             fmt.count(r["traffic"]) if fss else "FSS only",
             (fmt.pct_plain(r["conversion"], 2) if fss and r["conversion"]
              else "FSS only"),
             r["conversion_move"] if fss else "FSS only",
-            fmt.pct_plain(r["omni_penetration"], 2)))
+            "not attributable" if att
+            else fmt.pct_plain(r["omni_penetration"], 2)))
     rows.append((("total", "Total"), "",
                  fmt.money_compact(cb["total"]), "100.0%", "", "", "", "", "",
                  "", ""))
@@ -470,9 +478,26 @@ def _channel_section(cb) -> str:
                           "omni-attributed sales inside this channel"])]
     parts = " + ".join("%s %s" % (r["label"], fmt.money_exact(r["net_sales"]))
                        for r in cb["rows"]) or "nothing"
-    out.append(_recon("%s = %s, this view's headline, to the cent (BR-11 "
-                      "applied to the channel cut)."
-                      % (parts, fmt.money_exact(cb["total"]))))
+    if cb.get("attributed_channel"):
+        # The one scope where the channel total is NOT the page headline, so
+        # it says which figure is which instead of asserting an equality it
+        # does not have. The stores row alone is the headline above; the
+        # attributed row is trade the headline never counted.
+        stores = next((r for r in cb["rows"] if not r.get("attributed")), None)
+        out.append(_recon(
+            "%s = %s, the total of this cut, to the cent. The %s above is the "
+            "headline on this page: e-commerce carries no brand entity, so a "
+            "brand's online trade sits outside a stores-only headline and is "
+            "attributed here through the SKU (BR-11 applied to the channel "
+            "cut, with the grain stated rather than assumed)."
+            % (parts, fmt.money_exact(cb["total"]),
+               fmt.money_exact(stores["net_sales"]) if stores else "figure")))
+    else:
+        out.append(_recon("%s = %s, this view's headline, to the cent (BR-11 "
+                          "applied to the channel cut)."
+                          % (parts, fmt.money_exact(cb["total"]))))
+    if cb.get("attribution_note"):
+        out.append('<p class="key">%s</p>' % esc(cb["attribution_note"]))
     out.append('<p class="key">%s</p>' % esc(cb["omni_note"]))
     out.append('<p class="key">%s</p>' % esc(cb["traffic_note"]))
     if cb["scope_note"]:

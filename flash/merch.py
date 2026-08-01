@@ -433,6 +433,53 @@ def category_slide_run(da, day: D, category: str, max_days: int = 30,
             "consecutive_negative_days": run, "days": checked}
 
 
+def ecom_by_brand(da, day: D, brand_id: str,
+                  ly_override: Optional[D] = None) -> Dict[str, object]:
+    """A brand's e-commerce trade, attributed through the SKU.
+
+    E-commerce is one entity per affiliate and carries no `brand_id` — the
+    house sells all three brands from one storefront. So a brand's online
+    trade cannot be read off the entity dimension the way its doors can; it
+    has to come from the only place the brand is actually recorded, which is
+    the product joined to the sales line (BR-5 applied to dimensions, the same
+    join `category_day` uses).
+
+    What this can and cannot carry is decided by the grain, not by taste.
+    Sales and units are SKU-grain facts, so they attribute exactly. Plan is
+    set per entity and traffic is a door-counter reading, so neither exists at
+    this grain; omni orders are entity-grain too (`omni_order` has no SKU), so
+    penetration is not attributable either. Those are returned as unavailable
+    with the reason, never as zero (BR-15's discipline applied to a second
+    kind of missing)."""
+    if not has_detail(da, day):
+        return _unavailable(da, day, "ecom_by_brand")
+    ly = ly_override or da.ly_date(day)
+    if not has_detail(da, ly):
+        return _unavailable(da, ly, "ecom_by_brand (last-year side)")
+    ids = da.scope_ids(channel="ECOM")
+
+    def side(d):
+        net, units = 0.0, 0
+        for _sku, _cat, bid, eid, amount, u in _lines(da, d, ids):
+            if bid != brand_id:
+                continue
+            net += da.convert(amount, da.entity(eid)["currency"])
+            units += u
+        return round(net, 2), units
+
+    ty_net, ty_units = side(day)
+    ly_net, _ly_units = side(ly)
+    return {
+        "available": True, "date": day.isoformat(), "ly_date": ly.isoformat(),
+        "brand_id": brand_id, "entity_ids": list(ids),
+        "net_sales": ty_net, "units": ty_units, "ly_net_sales": ly_net,
+        "comp_pct": ((ty_net / ly_net - 1.0) if ly_net else None),
+        "basis": ("Σ sales_line for this brand's SKUs at %s, converted to %s, "
+                  "against the day-aligned last-year date on the same "
+                  "entities." % (" and ".join(ids), da.reporting_currency)),
+    }
+
+
 def reconcile_lines(da, day: D, **scope) -> Dict[str, object]:
     """BR-11 re-derived: Σ sales_line = sales_day, per entity, to the cent."""
     ids = da.scope_ids(**scope)

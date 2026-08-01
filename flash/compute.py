@@ -183,18 +183,32 @@ def _channel_block(da, day: D, ly_override=None, **scope) -> Dict[str, object]:
         row["omni_penetration"] = att["penetration"]
         row["omni_parts"] = att["parts"]
         row["traffic_applies"] = (key == "STORE")
+        row["attributed"] = False
         rows.append(row)
-    total = da.net_sales(day, **scope)
+
+    headline = da.net_sales(day, **scope)
+    # A brand has no e-commerce ENTITY — the house sells all three brands from
+    # one storefront — but it certainly has e-commerce TRADE. Attributing it
+    # through the SKU is the only honest way to show the channel split a brand
+    # manager actually reads (BR-5: the product join is where brand lives).
+    attributed = None
+    if "ECOM" in missing and list(scope) == ["brand_id"]:
+        attributed = _ecom_brand_row(da, day, scope["brand_id"])
+        if attributed is not None:
+            rows.append(attributed)
+            missing = [m for m in missing if m != "ECOM"]
+
+    total = round(sum(r["net_sales"] for r in rows), 2)
     reconcile_display(rows, "net_sales", total)
     for r in rows:
         r["mix_pct"] = (r["net_sales"] / total) if total else None
     note = None
     if missing:
         if "ECOM" in missing:
-            note = ("No e-commerce entity trades at this scope, so this is a "
-                    "stores-only view. E-commerce is reported at brand, "
-                    "affiliate and corporate scope, where it exists as its own "
-                    "channel; the online touch a door owns is its omni "
+            note = ("No e-commerce entity trades at this scope, and no "
+                    "e-commerce trade can be attributed to it, so this is a "
+                    "stores-only view. A region, a district and a door are "
+                    "sets of doors; the online touch a door owns is its omni "
                     "execution, which is in the omni section.")
         else:
             note = ("No stores trade at this scope, so this is an "
@@ -203,12 +217,56 @@ def _channel_block(da, day: D, ly_override=None, **scope) -> Dict[str, object]:
         "rows": rows, "channels": [r["key"] for r in rows],
         "missing_channels": missing,
         "total": total,
+        "headline_total": headline,
+        "attributed_channel": (attributed["key"] if attributed else None),
+        "attribution_note": (attributed["basis_note"] if attributed else None),
         "children_sum": round(sum(r["net_sales"] for r in rows), 2),
         "scope_note": note,
         "omni_note": attribution["note"],
         "traffic_note": ("Traffic and conversion are FSS — free-standing "
                          "stores — only. E-commerce has no door traffic, so "
                          "the row is unavailable rather than zero (BR-15)."),
+    }
+
+
+def _ecom_brand_row(da, day: D, brand_id: str) -> Optional[Dict[str, object]]:
+    """The brand's e-commerce row, attributed through the SKU.
+
+    It carries sales, units and a comp, because those are SKU-grain facts and
+    attribute exactly. It carries no plan, no traffic and no omni penetration,
+    because plan is set per entity, traffic is a door-counter reading and
+    `omni_order` has no SKU column — so at this grain they do not exist. They
+    are marked unavailable with the reason rather than printed as zero, which
+    is BR-15's discipline applied to a second kind of missing."""
+    att = merch.ecom_by_brand(da, day, brand_id)
+    if not att.get("available"):
+        return None
+    return {
+        "key": "ECOM", "label": "E-commerce", "region": None,
+        "currencies": da.currencies_in_scope(channel="ECOM"),
+        "currency_note": da.currency_note(channel="ECOM"),
+        "net_sales": att["net_sales"], "comp_pct": att["comp_pct"],
+        "comp_ty": att["net_sales"], "comp_ly": att["ly_net_sales"],
+        "comp_gap": round(att["net_sales"] - att["ly_net_sales"], 2),
+        "comp_members": len(att["entity_ids"]),
+        "open_entities": len(att["entity_ids"]),
+        "reported_entities": len(att["entity_ids"]),
+        "plan": None, "plan_attainment": None, "plan_grain_mix": [],
+        "conversion": None, "conversion_bps_vs_ly": None,
+        "conversion_move": None, "conversion_move_full": None,
+        "traffic": None, "upt": None, "ly_upt": None,
+        "upt_pct_vs_ly": None, "ast_pct_vs_ly": None,
+        "units": att["units"], "entity_ids": att["entity_ids"],
+        "omni_attributed": None, "omni_penetration": None, "omni_parts": {},
+        "traffic_applies": False, "attributed": True,
+        "basis_note": (
+            "E-commerce is one storefront per affiliate selling all three "
+            "brands, so it carries no brand entity. This row is the brand's "
+            "online trade attributed through the SKU — %s Plan, traffic and "
+            "omni penetration are left unavailable rather than zero: plan is "
+            "set per entity, traffic is a door-counter reading, and omni "
+            "orders are recorded at entity grain with no SKU, so none of the "
+            "three exists at this grain." % att["basis"]),
     }
 
 
