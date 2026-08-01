@@ -1392,5 +1392,275 @@ class OpsTableCase(unittest.TestCase):
         self.assertIn("no traffic posted", txt)
 
 
+def _channel_table(txt):
+    """The channel section's own table, as rows of stripped cell text."""
+    i = txt.find('id="stores-and-e-commerce"')
+    if i < 0:
+        return None
+    seg = txt[i:].split("<h2")[0]
+    m = re.search(r'<table class="channel">.*?</table>', seg, re.S)
+    if not m:
+        return None
+    rows = []
+    for tr in re.findall(r"<tr.*?</tr>", m.group(0), re.S):
+        rows.append([re.sub("<[^>]+>", "", c).strip()
+                     for c in re.findall(r"<t[hd][^>]*>(.*?)</t[hd]>", tr, re.S)])
+    return seg, rows
+
+
+class ChannelSectionCase(unittest.TestCase):
+    """Stores against e-commerce, as it reaches the page."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.dir = dbfixture.site_dir()
+        cls.obj = dbfixture.site_objects()[-1]
+        cls.date = cls.obj["date"]
+
+    def _pages_with_channel(self):
+        for r, _d, fs in os.walk(self.dir):
+            for f in sorted(fs):
+                if not f.endswith(".html"):
+                    continue
+                p = os.path.join(r, f)
+                txt = _read(p)
+                got = _channel_table(txt)
+                if got:
+                    yield os.path.relpath(p, self.dir), got[0], got[1]
+
+    def test_every_persona_landing_carries_the_section(self):
+        for rel in ("corporate/%s.html" % self.date,
+                    "brand/LUM/%s.html" % self.date,
+                    "region/west/%s.html" % self.date,
+                    "affiliate/CA/%s.html" % self.date,
+                    "field/%s.html" % self.date,
+                    "day/%s.html" % self.date):
+            txt = _read(os.path.join(self.dir, rel))
+            self.assertIsNotNone(_channel_table(txt),
+                                 "%s has no channel section" % rel)
+
+    def test_no_channel_table_anywhere_has_a_third_channel(self):
+        """BR-9 regression, swept over the whole tree.
+
+        The failure this guards against is an omni ROW being added to the one
+        table a reader is most likely to add up."""
+        checked = 0
+        for rel, _seg, rows in self._pages_with_channel():
+            body = [r for r in rows[1:] if r and r[0]]
+            labels = [r[0] for r in body]
+            self.assertEqual(
+                labels[-1], "Total",
+                "%s: the channel table's last row is %r, not a total"
+                % (rel, labels[-1]))
+            channels = labels[:-1]
+            self.assertLessEqual(
+                len(channels), 2,
+                "%s has channel rows %s. Stores and e-commerce are the only "
+                "two; omni is a penetration column, never a row (BR-9)."
+                % (rel, channels))
+            for c in channels:
+                self.assertTrue(
+                    c.startswith("Stores") or c.startswith("E-commerce"),
+                    "%s: unexpected channel row %r" % (rel, c))
+                self.assertNotIn("mni", c, "%s: omni became a row" % rel)
+            checked += 1
+        self.assertGreater(checked, 20, "swept too few pages")
+
+    def test_the_reconciliation_line_adds_up_as_printed(self):
+        """A column a reader can add up always adds up — read off the HTML."""
+        money = re.compile(r"\$([\d,]+\.\d\d)")
+        checked = 0
+        for rel, seg, _rows in self._pages_with_channel():
+            recon = re.search(r'<div class="recon">(.*?)</div>', seg, re.S)
+            self.assertIsNotNone(recon, "%s has no reconciliation" % rel)
+            text = re.sub("<[^>]+>", "", recon.group(1))
+            nums = [float(x.replace(",", "")) for x in money.findall(text)]
+            self.assertGreaterEqual(len(nums), 2, "%s: %s" % (rel, text))
+            parts, total = nums[:-1], nums[-1]
+            if "the headline on this page" in text:
+                parts, total = nums[:2], nums[2]     # brand: a + b = total
+            self.assertAlmostEqual(
+                round(sum(parts), 2), total, places=2,
+                msg="%s prints %s = %.2f, which does not add up (BR-11)."
+                    % (rel, " + ".join("%.2f" % p for p in parts), total))
+            checked += 1
+        self.assertGreater(checked, 20)
+
+    def test_ecom_rows_say_fss_only_rather_than_zero(self):
+        """BR-15: e-commerce has no door traffic, so it is unavailable."""
+        checked = 0
+        for rel, seg, rows in self._pages_with_channel():
+            head = rows[0]
+            ecom = [r for r in rows[1:] if r and r[0].startswith("E-commerce")]
+            if not ecom:
+                continue
+            self.assertIn("FSS", seg, rel)
+            self.assertIn("BR-15", seg, rel)
+            for r in ecom:
+                for col in ("Traffic", "Conversion"):
+                    v = r[head.index(col)]
+                    self.assertNotIn(
+                        "0", v.replace("FSS only", ""),
+                        "%s: e-commerce %s reads %r — missing is never zero "
+                        "(BR-15)." % (rel, col, v))
+                    self.assertTrue(
+                        v in ("FSS only", "not attributable"),
+                        "%s: e-commerce %s reads %r" % (rel, col, v))
+            checked += 1
+        self.assertGreater(checked, 10)
+
+    def test_single_channel_scopes_carry_the_disclosure(self):
+        rel = "region/west/%s.html" % self.date
+        seg, rows = _channel_table(_read(os.path.join(self.dir, rel)))
+        body = [r[0] for r in rows[1:] if r and r[0]]
+        self.assertEqual(body, ["Stores", "Total"], body)
+        self.assertIn("stores-only view", seg)
+        self.assertIn("omni section", seg)
+
+    def test_brand_pages_attribute_ecom_and_name_the_grain(self):
+        for b in ("LUM", "ATN", "BOT"):
+            rel = "brand/%s/%s.html" % (b, self.date)
+            seg, rows = _channel_table(_read(os.path.join(self.dir, rel)))
+            labels = [r[0] for r in rows[1:] if r and r[0]]
+            self.assertEqual(labels,
+                             ["Stores", "E-commerce (attributed by SKU)",
+                              "Total"], "%s: %s" % (rel, labels))
+            self.assertIn("attributed through the SKU", seg)
+            self.assertIn("not attributable", seg)
+            self.assertNotIn("where it exists as its own channel", seg)
+
+
+class DoorFilterCase(unittest.TestCase):
+    """The door-selection filter: pre-rendered views, no script.
+
+    Every assertion re-derives the expected door set from the roster in the
+    database, never from the filter view's own claim about itself."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.dir = dbfixture.site_dir()
+        cls.comp = dbfixture.companion_dir()
+        cls.base = dbfixture.COMPANION_BASE
+        cls.obj = dbfixture.site_objects()[-1]
+        cls.date = cls.obj["date"]
+        cls.da = dbfixture.da()
+        cls.views = render_site.store_filter_views(cls.obj)
+
+    def _roster(self):
+        """Doors and their dimensions, straight from the stores table."""
+        return [e for e in self.da.entities() if e["channel"] != "ECOM"]
+
+    def test_there_is_a_view_for_every_level_above_the_door(self):
+        want = set()
+        for e in self._roster():
+            want.add(("brand", e["brand_id"]))
+            want.add(("region", e["region"]))
+            want.add(("affiliate", e["affiliate_id"]))
+            want.add(("district", e["district_id"]))
+        got = set((v["dim"], v["value"]) for v in self.views)
+        self.assertEqual(got, want, "filter values drifted from the roster")
+
+    def test_every_view_is_written_for_every_full_depth_day(self):
+        for v in self.views:
+            p = os.path.join(self.dir, *(v["path"] % self.date).split("/"))
+            self.assertTrue(os.path.exists(p), p)
+
+    def test_each_view_lists_exactly_the_doors_matching_its_filter(self):
+        field = {"brand": "brand_id", "region": "region",
+                 "affiliate": "affiliate_id", "district": "district_id"}
+        link = re.compile(r'href="[^"]*store/([A-Za-z0-9-]+)/%s\.html"'
+                          % re.escape(self.date))
+        for v in self.views:
+            expected = sorted(e["entity_id"] for e in self._roster()
+                              if e[field[v["dim"]]] == v["value"])
+            txt = _read(os.path.join(self.dir,
+                                     *(v["path"] % self.date).split("/")))
+            listed = sorted(set(link.findall(txt)))
+            self.assertEqual(
+                listed, expected,
+                "%s/%s lists %s but the roster says %s"
+                % (v["dim"], v["key"], listed, expected))
+            self.assertTrue(expected, "%s/%s is an empty view" % (v["dim"], v["key"]))
+
+    def test_each_view_states_its_filter_in_words(self):
+        for v in self.views:
+            txt = _read(os.path.join(self.dir,
+                                     *(v["path"] % self.date).split("/")))
+            self.assertIn("Filtered — %s: %s" % (v["heading"], v["label"]), txt)
+            self.assertIn("<title>Store Manager — %s %s"
+                          % (v["heading"], v["label"]), txt)
+
+    def test_the_filter_bar_is_on_the_entry_and_on_every_view(self):
+        pages = [os.path.join(self.dir, "store-manager", "%s.html" % self.date)]
+        pages += [os.path.join(self.dir, *(v["path"] % self.date).split("/"))
+                  for v in self.views]
+        for p in pages:
+            txt = _read(p)
+            self.assertIn('<div class="filterbar">', txt, p)
+            self.assertIn("Every door", txt, p)
+            for v in self.views:                       # sibling filters, all of them
+                self.assertIn("%s (%d)" % (v["label"], len(v["entity_ids"])),
+                              txt, "%s missing sibling %s" % (p, v["key"]))
+
+    def test_every_filter_link_resolves_to_a_file_that_exists(self):
+        checked = 0
+        for rel in ["store-manager/%s.html" % self.date] + [
+                v["path"] % self.date for v in self.views]:
+            path = os.path.join(self.dir, *rel.split("/"))
+            here = posixpath.dirname(rel)
+            bar = re.search(r'<div class="filterbar">.*?</div>\s*</div>',
+                            _read(path), re.S)
+            self.assertIsNotNone(bar, rel)
+            for h in HREF_RE.findall(bar.group(0)):
+                t = posixpath.normpath(posixpath.join(here, h.split("#")[0]))
+                self.assertTrue(
+                    os.path.exists(os.path.join(self.dir, *t.split("/"))),
+                    "%s -> %s is dead" % (rel, h))
+                checked += 1
+        self.assertGreater(checked, 100)
+
+    def test_the_views_carry_no_script(self):
+        """The what-if calculator stays the only JavaScript in the product."""
+        for v in self.views:
+            txt = _read(os.path.join(self.dir,
+                                     *(v["path"] % self.date).split("/")))
+            self.assertNotIn("<script", txt)
+            self.assertNotIn("onclick", txt)
+
+    def test_the_filter_is_site_only_and_the_companion_keeps_its_entry(self):
+        self.assertTrue(os.path.exists(
+            os.path.join(self.comp, "store-manager", "%s.html" % self.date)))
+        for v in self.views:
+            self.assertFalse(
+                os.path.exists(os.path.join(self.comp,
+                                            *(v["path"] % self.date).split("/"))),
+                "%s was rendered into the companion — the filter views are "
+                "site-only, and the companion has a file ceiling." % v["key"])
+
+    def test_companion_filter_links_go_only_to_the_sanctioned_origin(self):
+        txt = _read(os.path.join(self.comp, "store-manager",
+                                 "%s.html" % self.date))
+        bar = re.search(r'<div class="filterbar">.*?</div>\s*</div>', txt, re.S)
+        self.assertIsNotNone(bar)
+        external = 0
+        for h in HREF_RE.findall(bar.group(0)):
+            if h.startswith(("http://", "https://")):
+                self.assertTrue(h.startswith(self.base),
+                                "unsanctioned origin: %s" % h)
+                external += 1
+            else:                       # only the unfiltered entry stays local
+                t = posixpath.normpath(
+                    posixpath.join("store-manager", h.split("#")[0]))
+                self.assertTrue(os.path.exists(
+                    os.path.join(self.comp, *t.split("/"))), h)
+        self.assertEqual(external, len(self.views))
+
+    def test_the_companion_discloses_that_the_filter_views_live_elsewhere(self):
+        txt = _read(os.path.join(self.comp, "store-manager",
+                                 "%s.html" % self.date))
+        self.assertIn("door-filter views", txt)
+        self.assertIn(self.base, txt)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

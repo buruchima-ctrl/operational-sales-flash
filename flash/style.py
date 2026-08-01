@@ -371,6 +371,26 @@ ul.exc .r{
   margin:0 0 var(--sp-3);display:flex;flex-wrap:wrap;gap:var(--sp-4);
 }
 .keyrow i{font-style:normal}
+
+/* The door filter — anchors and CSS only. One row per dimension, each row a
+   label and a wrapping set of links, so the bar stays readable at 22 values
+   and collapses to a stack on a phone without a media query of its own. */
+.filterbar{
+  margin:0 0 var(--sp-4);border:1px solid var(--rule);border-radius:3px;
+  background:var(--panel-2);padding:var(--sp-2) var(--sp-3);
+}
+.filterbar .frow{display:flex;flex-wrap:wrap;align-items:baseline;gap:var(--sp-2)}
+.filterbar .frow + .frow{border-top:1px solid var(--rule);margin-top:var(--sp-2);padding-top:var(--sp-2)}
+.filterbar .flab{
+  font-family:var(--display);font-size:var(--fs-xs);text-transform:uppercase;
+  letter-spacing:.06em;color:var(--soft);font-weight:700;min-width:5.5rem;
+}
+.filterbar nav.personas{margin:0;border-bottom:none;padding-bottom:0;flex:1 1 auto}
+.filterbar nav.personas a{padding:2px var(--sp-2);margin-bottom:0;border-radius:2px}
+.filterbar nav.personas a.on{
+  background:var(--panel);border-color:var(--rule);border-bottom:1px solid var(--rule);
+}
+
 .tri{font-style:normal;padding-right:3px}
 .tri.up{color:var(--good)} .tri.dn{color:var(--bad)} .tri.mid{color:var(--faint)}
 

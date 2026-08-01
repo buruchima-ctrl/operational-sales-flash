@@ -397,5 +397,148 @@ class ExtractCase(unittest.TestCase):
                                places=2)
 
 
+class ChannelBlockCase(unittest.TestCase):
+    """The channel cut, re-derived from the database rather than believed.
+
+    Every figure here is recomputed straight off `sales_day` / `sales_line`
+    and compared to what compute emitted. A test that reads the object twice
+    and compares it to itself proves only that the object is stable."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.da = dbfixture.da()
+        cls.obj = dbfixture.site_objects()[-1]
+        cls.day = D.fromisoformat(cls.obj["date"])
+
+    def _hand_net(self, **scope):
+        """Σ net sales over the reported entities in scope, converted, by hand."""
+        total = 0.0
+        for e in self.da._scope_entities(**scope):
+            v = self.da.net_sales_of(e["entity_id"], self.day)
+            if v is not None:
+                total += v
+        return round(total, 2)
+
+    def test_channel_rows_sum_to_the_scope_headline(self):
+        """BR-11 on the channel cut, for every persona that has both channels."""
+        checked = 0
+        for key, p in self.obj["personas"].items():
+            cb = p["channel_block"]
+            if cb.get("attributed_channel"):
+                continue          # brand — covered by its own test below
+            rows = sum(r["net_sales"] for r in cb["rows"])
+            self.assertAlmostEqual(
+                round(rows, 2), cb["total"], places=2,
+                msg="BR-11: %s channel rows sum to %.2f but the section total "
+                    "says %.2f. Fix _channel_block, not the renderer."
+                    % (key, rows, cb["total"]))
+            self.assertAlmostEqual(
+                cb["total"], p["headline"]["net_sales"], places=2,
+                msg="BR-11: %s channel total %.2f != its own headline %.2f. "
+                    "The channel cut must partition the headline it sits under."
+                    % (key, cb["total"], p["headline"]["net_sales"]))
+            checked += 1
+        self.assertGreater(checked, 0)
+
+    def test_each_channel_row_is_the_hand_summed_total(self):
+        cb = self.obj["personas"]["corporate/corporate"]["channel_block"]
+        for r in cb["rows"]:
+            self.assertAlmostEqual(
+                r["net_sales"], self._hand_net(channel=r["key"]), places=2,
+                msg="channel %s does not match Σ sales_day over its entities"
+                    % r["key"])
+
+    def test_exactly_two_channels_exist_and_never_a_third(self):
+        """BR-9 regression: omni is a share OF a channel, never a channel."""
+        for key, p in self.obj["personas"].items():
+            cb = p["channel_block"]
+            self.assertLessEqual(
+                len(cb["rows"]), 2,
+                "%s has %d channel rows. Stores and e-commerce are the only "
+                "channels; an omni row here would double-count the headline "
+                "(BR-9)." % (key, len(cb["rows"])))
+            self.assertEqual(sorted(r["key"] for r in cb["rows"]),
+                             sorted(set(r["key"] for r in cb["rows"])))
+            for r in cb["rows"]:
+                self.assertIn(r["key"], ("STORE", "ECOM"))
+
+    def test_omni_rides_inside_a_channel_and_never_exceeds_it(self):
+        cb = self.obj["personas"]["corporate/corporate"]["channel_block"]
+        for r in cb["rows"]:
+            if r.get("omni_attributed") is None:
+                continue
+            self.assertLessEqual(
+                r["omni_attributed"], r["net_sales"] + 0.005,
+                "omni attributed to %s exceeds that channel's own net sales — "
+                "attribution is a share, never an addition (BR-9)." % r["key"])
+            if r["net_sales"]:
+                self.assertAlmostEqual(
+                    r["omni_penetration"],
+                    r["omni_attributed"] / r["net_sales"], places=6)
+
+    def test_omni_parts_are_partitioned_between_the_two_channels(self):
+        """Every attributed family lands in exactly one channel, none dropped."""
+        att = omni.attribution_by_channel(self.da, self.day)
+        whole = omni.omni_attributed_sales(self.da, self.day)["parts"]
+        seen = {}
+        for ch in ("STORE", "ECOM"):
+            for k, v in att[ch]["parts"].items():
+                self.assertNotIn(k, seen, "%s counted in two channels" % k)
+                seen[k] = v
+        self.assertEqual(sorted(seen), sorted(whole))
+        for k, v in whole.items():
+            self.assertAlmostEqual(seen[k], v, places=2)
+
+    def test_scopes_without_an_ecom_entity_disclose_it(self):
+        empty = [k for k, p in self.obj["personas"].items()
+                 if len(p["channel_block"]["rows"]) < 2]
+        self.assertTrue(empty, "expected region scopes to have no ECOM entity")
+        for key in empty:
+            cb = self.obj["personas"][key]["channel_block"]
+            self.assertTrue(
+                cb["scope_note"],
+                "%s shows one channel and says nothing about the other. A "
+                "missing channel is disclosed, never printed as zero." % key)
+            self.assertIn("stores-only", cb["scope_note"])
+
+    def test_traffic_is_flagged_fss_only_on_the_ecom_row(self):
+        cb = self.obj["personas"]["corporate/corporate"]["channel_block"]
+        by = {r["key"]: r for r in cb["rows"]}
+        self.assertTrue(by["STORE"]["traffic_applies"])
+        self.assertFalse(by["ECOM"]["traffic_applies"])
+        self.assertIn("FSS", cb["traffic_note"])
+        self.assertIn("BR-15", cb["traffic_note"])
+
+    def test_brand_ecom_is_attributed_through_the_sku(self):
+        """The brand scope: no ECOM entity, but real online trade."""
+        for key, p in self.obj["personas"].items():
+            if not key.startswith("brand/"):
+                continue
+            cb = p["channel_block"]
+            self.assertEqual(cb["attributed_channel"], "ECOM", key)
+            row = next(r for r in cb["rows"] if r.get("attributed"))
+            hand = merch.ecom_by_brand(self.da, self.day, key.split("/", 1)[1])
+            self.assertAlmostEqual(row["net_sales"], hand["net_sales"], places=2)
+            # the grain the attribution cannot carry, refused rather than zeroed
+            self.assertIsNone(row["plan_attainment"])
+            self.assertIsNone(row["traffic"])
+            self.assertIsNone(row["omni_penetration"])
+            # stores alone remain the page headline
+            stores = next(r for r in cb["rows"] if not r.get("attributed"))
+            self.assertAlmostEqual(stores["net_sales"],
+                                   p["headline"]["net_sales"], places=2)
+            self.assertAlmostEqual(
+                cb["total"], round(stores["net_sales"] + row["net_sales"], 2),
+                places=2)
+
+    def test_brand_attributed_ecom_sums_to_the_fleet_ecom(self):
+        """Every online dollar belongs to exactly one brand."""
+        total = sum(merch.ecom_by_brand(self.da, self.day, b["brand_id"])
+                    ["net_sales"] for b in self.da.brands())
+        self.assertAlmostEqual(total, self.da.net_sales(self.day,
+                                                        channel="ECOM"),
+                               places=1)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

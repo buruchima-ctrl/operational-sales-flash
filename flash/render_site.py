@@ -273,11 +273,13 @@ def _companion_band(obj_or_base) -> str:
     return _band(
         "note", "Summary companion — full drill-down lives on the complete site",
         'This companion carries the daily flash, the morning digests, the five '
-        'persona landings and the omni, customer, merchandise, category and '
-        'rank panels. Door, district, hourly, KPI-tree and SKU pages live on '
-        'the complete site at <a href="%s">%s</a>, and every link to one of '
-        'them below goes there. The figures are identical: both sites render '
-        'from the same computed object (BR-13).' % (esc(base), esc(base)))
+        'persona landings, the unfiltered Store Manager door picker, and the '
+        'omni, customer, merchandise, category and rank panels. Door, '
+        'district, hourly, KPI-tree and SKU pages live on the complete site at '
+        '<a href="%s">%s</a>, and so do the pre-rendered door-filter views — '
+        'every link to one of them below goes there. The figures are '
+        'identical: both sites render from the same computed object (BR-13).'
+        % (esc(base), esc(base)))
 
 
 def _fav_key() -> str:
@@ -1428,23 +1430,120 @@ def render_corp_trends(obj, series, depth: int) -> str:
 # Drill pages — district, door, hourly, tree, category, SKU
 # =========================================================================
 
-def render_store_entry(obj, nav) -> str:
-    """The Store Manager entry page: pick your door.
+# Every level ABOVE the door, which is exactly what a filter can narrow to.
+# (dimension key, heading, the field on a door block, whether the path segment
+# needs slugging). Order is fixed, so the bar reads the same on every page.
+STORE_FILTER_DIMS = (
+    ("brand", "Brand", "brand_id", False),
+    ("region", "Region", "region", True),
+    ("affiliate", "Affiliate", "affiliate_id", False),
+    ("district", "District", "district_id", False),
+)
+
+
+def store_filter_views(obj) -> List[dict]:
+    """The filter views for one day, in a fixed order.
+
+    A door picker over twenty-nine doors is a list; over a fleet it is a
+    haystack. The filter is pre-rendered rather than scripted because the
+    what-if calculator is the only JavaScript in the product, and a picker
+    that stops working when a script fails is a picker for a demo.
+
+    One view per value of every level above the door. Nothing is invented:
+    the values are read off the door blocks themselves, so a filter can never
+    offer a district that has no doors, and every view is guaranteed to list
+    at least one."""
+    stores = list(obj["stores"].values())
+    labels = {k.split("/", 1)[1]: p["label"]
+              for k, p in obj.get("personas", {}).items()}
+    out = []
+    for dim, heading, field, slugged in STORE_FILTER_DIMS:
+        values = sorted(set(s[field] for s in stores if s.get(field)))
+        for v in values:
+            seg = _slug(v) if slugged else v
+            out.append({
+                "dim": dim, "heading": heading, "field": field, "value": v,
+                "key": seg,
+                "label": labels.get(v, v) if dim != "district" else v,
+                "path": "store-manager/%s/%s/%%s.html" % (dim, seg),
+                "entity_ids": sorted(s["entity_id"] for s in stores
+                                     if s.get(field) == v),
+            })
+    return out
+
+
+def _store_filter_bar(depth: int, date_iso: str, views, current=None) -> str:
+    """The filter bar — anchors and CSS, no script.
+
+    It is shown on the unfiltered entry and on every filtered view, always
+    with the same values in the same order, so a reader who has narrowed can
+    always see what else they could have picked and get back to all doors in
+    one click."""
+    o = ['<div class="filterbar">']
+    o.append('<div class="frow"><span class="flab">All</span>'
+             '<nav class="personas"><a class="%s" href="%s">Every door</a>'
+             '</nav></div>'
+             % ("on" if current is None else "",
+                esc(_href(depth, "store-manager/%s.html" % date_iso))))
+    for dim, heading, _field, _slugged in STORE_FILTER_DIMS:
+        picks = [v for v in views if v["dim"] == dim]
+        if not picks:
+            continue
+        links = []
+        for v in picks:
+            on = (current is not None and current["dim"] == dim
+                  and current["key"] == v["key"])
+            links.append('<a class="%s" href="%s">%s</a>'
+                         % ("on" if on else "",
+                            esc(_href(depth, v["path"] % date_iso)),
+                            esc("%s (%d)" % (v["label"], len(v["entity_ids"])))))
+        o.append('<div class="frow"><span class="flab">%s</span>'
+                 '<nav class="personas">%s</nav></div>'
+                 % (esc(heading), "".join(links)))
+    o.append("</div>")
+    return "".join(o)
+
+
+def render_store_entry(obj, nav, filt=None) -> str:
+    """The Store Manager entry page: pick your door, optionally narrowed.
 
     The other five personas each have one landing because there is one
     Corporate and six Regions. There are twenty-nine doors, so the sixth
     persona's landing is a door picker — no auth, an entry page like the rest
     (PRD §6). Doors are grouped by brand and then region, because a store
-    manager knows their brand before they know their district code."""
+    manager knows their brand before they know their district code.
+
+    `filt` is one of `store_filter_views`, and the filtered page is a
+    PRE-RENDERED file rather than a scripted narrowing of this one. Same
+    pattern as the rank KPI selector: the reader clicks a link and gets a
+    document. It costs a few hundred small files and buys a picker that works
+    with scripting off, from `file://`, and in a printout."""
     depth = nav["depth"]
     date_iso = obj["date"]
     d = obj["display"]
+    views = store_filter_views(obj)
+    title = ("Pick your door — %s" % d["date_long"] if filt is None
+             else "%s: %s — %s" % (filt["heading"], filt["label"],
+                                   d["date_long"]))
     o = [_persona_nav(depth, date_iso, "store"), _companion_band(obj),
          _crumbs(depth, nav["crumbs"]),
-         _header("Store Manager view · %s" % obj["product"],
-                 "Pick your door — %s" % d["date_long"],
+         _header("Store Manager view · %s" % obj["product"], title,
                  "Opens on: your own door · hourly · KPI tree · omni · "
                  "customer · %s" % esc(d["week_label"]))]
+    o.append(_store_filter_bar(depth, date_iso, views, filt))
+    if filt is not None:
+        o.append(_band(
+            "note", "Filtered — %s: %s" % (filt["heading"], filt["label"]),
+            "This view lists the %d door%s whose %s is %s, and nothing else. "
+            'It is one of a set of pre-rendered views: <a href="%s">every '
+            "door</a> is the unfiltered entry, and the bar above carries every "
+            "other filter. The filter narrows WHICH DOORS ARE LISTED — each "
+            "door's own figures are unchanged, because they are the same "
+            "computed object the day flash and the extract read (BR-18)."
+            % (len(filt["entity_ids"]),
+               "" if len(filt["entity_ids"]) == 1 else "s",
+               esc(filt["heading"].lower()), esc(filt["label"]),
+               esc(_href(depth, "store-manager/%s.html" % date_iso)))))
     o.append(_band("note", "One page per door per day",
                    "Each door's landing opens on what that door can act on "
                    "today — its conversion, its basket, its omni execution, "
@@ -1453,6 +1552,8 @@ def render_store_entry(obj, nav) -> str:
                    "Store Manager page beneath it."))
 
     stores = [b for b in obj["stores"].values()]
+    if filt is not None:
+        stores = [b for b in stores if b.get(filt["field"]) == filt["value"]]
     by_brand = {}
     for b in stores:
         by_brand.setdefault(b["brand_id"] or "ECOM", []).append(b)
@@ -1488,13 +1589,20 @@ def render_store_entry(obj, nav) -> str:
                 ("raw", esc(top))))
         o.append(_table(["Door", "Region", "District", "Net sales", "% to LY",
                          "Conversion", "UPT", "Top of its own list"], rows))
-    o.append(_recon("Every figure here is the same computed object each door's "
-                    "own landing reads, and the same one the day flash and the "
-                    "extract read. Only the scope differs (BR-18)."))
+    o.append(_recon(
+        "Every figure here is the same computed object each door's own landing "
+        "reads, and the same one the day flash and the extract read. Only the "
+        "scope differs (BR-18).%s"
+        % ("" if filt is None else
+           " This view lists %d of the %d doors; the filter selects rows, it "
+           "does not recompute them." % (len(stores), len(obj["stores"])))))
     o.append(_legend())
     o.append(_footer())
-    return _page("Store Manager — pick your door, %s" % d["date_short"],
-                 "\n".join(o), depth=depth)
+    return _page(
+        ("Store Manager — pick your door, %s" % d["date_short"] if filt is None
+         else "Store Manager — %s %s, %s" % (filt["heading"], filt["label"],
+                                             d["date_short"])),
+        "\n".join(o), depth=depth)
 
 
 def render_district(obj, district_id: str, nav) -> str:
@@ -3029,6 +3137,17 @@ def _build_deep(out_dir: str, obj, trend_series) -> List[str]:
         render_store_entry(obj, {"depth": 1,
                                  "crumbs": _crumb_base(date_iso, short)
                                  + [("Store Manager", None)]})))
+    # ...and one pre-rendered view per filter value. SITE ONLY: the companion
+    # has a thousand-file ceiling and these are a few hundred files, so it
+    # keeps the unfiltered entry and links out to these (see build_companion).
+    for v in store_filter_views(obj):
+        nav = {"depth": 3,
+               "crumbs": _crumb_base(date_iso, short)
+               + [("Store Manager", "store-manager/%s.html" % date_iso),
+                  ("%s: %s" % (v["heading"], v["label"]), None)]}
+        written.append(write(
+            os.path.join(out_dir, *(v["path"] % date_iso).split("/")),
+            render_store_entry(obj, nav, filt=v)))
 
     # districts
     for row in obj["slices"]["district"]:
