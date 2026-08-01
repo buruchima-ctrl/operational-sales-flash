@@ -435,6 +435,52 @@ def _headline_blocks(depth: int, h, linked: bool = True) -> str:
     return "".join(o)
 
 
+def _channel_section(cb) -> str:
+    """Stores against e-commerce — two channels and a total, never three.
+
+    Omni rides as a penetration column inside each channel rather than as a row
+    of its own, because a BOPIS order is money already sitting in e-commerce
+    demand and its upsell is money already sitting in the store's takings.
+    Adding an omni row would double-count the headline in the one table most
+    likely to be read as a partition of it (BR-9)."""
+    rows = []
+    for r in cb["rows"]:
+        fss = r["traffic_applies"]
+        rows.append((
+            r["label"], "%d/%d" % (r["reported_entities"], r["open_entities"]),
+            fmt.money_compact(r["net_sales"]), fmt.pct_plain(r["mix_pct"]),
+            ("raw", "%s %s" % (_tri(r["comp_pct"]), esc(fmt.pct(r["comp_pct"])))),
+            fmt.pct_plain(r["plan_attainment"]),
+            "/".join(r["plan_grain_mix"]) or "no plan",
+            fmt.count(r["traffic"]) if fss else "FSS only",
+            (fmt.pct_plain(r["conversion"], 2) if fss and r["conversion"]
+             else "FSS only"),
+            r["conversion_move"] if fss else "FSS only",
+            fmt.pct_plain(r["omni_penetration"], 2)))
+    rows.append((("total", "Total"), "",
+                 fmt.money_compact(cb["total"]), "100.0%", "", "", "", "", "",
+                 "", ""))
+    out = [_table(["Channel", "Posted", "Net sales", "Mix", "% to LY",
+                   "% to plan", "Plan grain", "Traffic", "Conversion",
+                   "vs LY + drivers", "OMNI penetration"], rows,
+                  cls="channel",
+                  titles=[None, None, None, "share of this view's net sales",
+                          None, "at each brand's native grain (BR-19)", None,
+                          "free-standing stores only", None, None,
+                          "omni-attributed sales inside this channel"])]
+    parts = " + ".join("%s %s" % (r["label"], fmt.money_exact(r["net_sales"]))
+                       for r in cb["rows"]) or "nothing"
+    out.append(_recon("%s = %s, this view's headline, to the cent (BR-11 "
+                      "applied to the channel cut)."
+                      % (parts, fmt.money_exact(cb["total"]))))
+    out.append('<p class="key">%s</p>' % esc(cb["omni_note"]))
+    out.append('<p class="key">%s</p>' % esc(cb["traffic_note"]))
+    if cb["scope_note"]:
+        out.insert(0, _band("note", "One channel at this scope",
+                            esc(cb["scope_note"])))
+    return "".join(out)
+
+
 def _exception_list(depth: int, d, limit: Optional[int] = None,
                     linked: bool = True) -> str:
     items = d["exceptions"][:limit] if limit else d["exceptions"]
@@ -721,6 +767,9 @@ def render_day(obj, nav: Optional[Dict[str, object]] = None) -> str:
 
     a('<h2 data-nav="Slices">By brand, affiliate, region and channel</h2>')
     a(_day_slices(obj, d, depth))
+
+    a('<h2 data-nav="Channels">Stores and e-commerce</h2>')
+    a(_channel_section(obj["channel_block"]))
 
     a("<h2>Omni — attribution, never addition</h2>")
     a(_day_omni(obj, d, depth))
@@ -1221,6 +1270,9 @@ def render_persona(obj, persona_key: str, nav: Dict[str, object]) -> str:
         a("<h2>Top doors — expand for the full rank</h2>")
         a(_corp_rank(obj, depth))
 
+    a('<h2 data-nav="Channels">Stores and e-commerce</h2>')
+    a(_channel_section(p["channel_block"]))
+
     a("<h2>Plan, at each brand's own grain</h2>")
     a(_persona_plan(p))
 
@@ -1557,6 +1609,9 @@ def render_store(obj, entity_id: str, nav) -> str:
 
     o.append("<h2>Merchandise at this door</h2>")
     o.append(_store_categories(obj, b, depth))
+
+    o.append('<h2 data-nav="Channels">Stores and e-commerce</h2>')
+    o.append(_channel_section(b["channel_block"]))
 
     o.append("<h2>Omni execution</h2>")
     o.append(_store_omni(b))

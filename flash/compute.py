@@ -133,6 +133,7 @@ def build_flash(da, day: D, as_of: Optional[D] = None, version: int = 1,
     obj["recap"] = _recap(da, day, dow)
     obj["currency_note"] = da.currency_note()
     obj["fx"] = _fx_block(da)
+    obj["channel_block"] = _channel_block(da, day, ly_override)
 
     if depth == "full":
         obj["personas"] = _personas(da, day, ly_override)
@@ -154,6 +155,62 @@ def build_flash(da, day: D, as_of: Optional[D] = None, version: int = 1,
 # =========================================================================
 # Comp, and the holiday override (BR-1)
 # =========================================================================
+
+CHANNEL_LABEL = {"STORE": "Stores", "ECOM": "E-commerce"}
+
+
+def _channel_block(da, day: D, ly_override=None, **scope) -> Dict[str, object]:
+    """Stores against e-commerce, at whatever scope is asking.
+
+    Two channels and a total — never three. Omni rides as a penetration column
+    inside each channel, because that is what it is (BR-9).
+
+    Where a channel does not exist at this scope the section says so rather
+    than printing a zero: a region has no e-commerce entity, and a row of
+    dashes reads like a bad day instead of a category error."""
+    attribution = omni.attribution_by_channel(da, day, **scope)
+    rows, missing = [], []
+    for key in CHANNELS:
+        merged = dict(scope)
+        merged["channel"] = key
+        ids = da.scope_ids(**merged)
+        if not ids:
+            missing.append(key)
+            continue
+        row = _slice(da, day, ly_override, merged, CHANNEL_LABEL[key], key)
+        att = attribution[key]
+        row["omni_attributed"] = att["attributed"]
+        row["omni_penetration"] = att["penetration"]
+        row["omni_parts"] = att["parts"]
+        row["traffic_applies"] = (key == "STORE")
+        rows.append(row)
+    total = da.net_sales(day, **scope)
+    reconcile_display(rows, "net_sales", total)
+    for r in rows:
+        r["mix_pct"] = (r["net_sales"] / total) if total else None
+    note = None
+    if missing:
+        if "ECOM" in missing:
+            note = ("No e-commerce entity trades at this scope, so this is a "
+                    "stores-only view. E-commerce is reported at brand, "
+                    "affiliate and corporate scope, where it exists as its own "
+                    "channel; the online touch a door owns is its omni "
+                    "execution, which is in the omni section.")
+        else:
+            note = ("No stores trade at this scope, so this is an "
+                    "e-commerce-only view.")
+    return {
+        "rows": rows, "channels": [r["key"] for r in rows],
+        "missing_channels": missing,
+        "total": total,
+        "children_sum": round(sum(r["net_sales"] for r in rows), 2),
+        "scope_note": note,
+        "omni_note": attribution["note"],
+        "traffic_note": ("Traffic and conversion are FSS — free-standing "
+                         "stores — only. E-commerce has no door traffic, so "
+                         "the row is unavailable rather than zero (BR-15)."),
+    }
+
 
 def _fx_block(da) -> Dict[str, object]:
     """The rate table, carried on every object so no surface has to look it up.
@@ -653,6 +710,7 @@ def _personas(da, day: D, ly_override) -> Dict[str, object]:
                 da, day, omni, customer_mod, merch,
                 kinds=ACTIONABLE_KINDS.get(spec["kind"]), **scope),
             "conversion_move": da.conversion_move(day, **scope),
+            "channel_block": _channel_block(da, day, ly_override, **scope),
         }
     return out
 
@@ -801,6 +859,7 @@ def _store_blocks(da, day: D) -> Dict[str, object]:
         block["conversion_move"] = da.conversion_move(day, **scope)
         block["headlines"] = build_store_headlines(da, day, eid, omni,
                                                    customer_mod, merch)
+        block["channel_block"] = _channel_block(da, day, None, **scope)
         block["hourly"] = da.hourly_series(eid, day)
         block["hourly_profile"] = da.hourly_profile(eid, day, weeks=4)
         block["tree"] = da.kpi_tree(eid, day)

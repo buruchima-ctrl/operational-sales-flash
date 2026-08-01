@@ -408,6 +408,43 @@ def omni_attributed_sales(da, day: D, **scope) -> Dict[str, object]:
     return {"parts": parts, "total": total}
 
 
+# Which channel each attributed slice already lives inside (BR-9). This is the
+# whole of the attribution rule made explicit: a BOPIS order is money sitting
+# in e-commerce demand, its pickup upsell is money sitting in the store's own
+# sales. Neither is a third channel.
+OMNI_PART_CHANNEL = {
+    "BOPIS": "ECOM", "RTD": "ECOM", "OOFIS": "ECOM",
+    "CR": "STORE", "BOPIS_UPSELL": "STORE", "CR_UPSELL": "STORE",
+    "BORIS_SAVES": "STORE",
+}
+
+
+def attribution_by_channel(da, day: D, **scope) -> Dict[str, object]:
+    """Omni-attributed sales split by the channel the money already sits in.
+
+    Omni is never a third channel. It is a share OF stores and a share OF
+    e-commerce, and this returns exactly that — so a channel table can carry a
+    penetration column without anyone being tempted to add a row."""
+    parts = omni_attributed_sales(da, day, **scope)["parts"]
+    out = {}
+    for channel in ("STORE", "ECOM"):
+        share = {k: v for k, v in parts.items()
+                 if OMNI_PART_CHANNEL[k] == channel}
+        merged = dict(scope)
+        merged["channel"] = channel
+        net = da.net_sales(day, **merged)
+        total = round(sum(share.values()), 2)
+        out[channel] = {
+            "parts": share, "attributed": total, "net_sales": net,
+            "penetration": (total / net) if net else None,
+        }
+    out["note"] = ("Omni penetration is a share of the channel the money "
+                   "already sits in — a pickup inside e-commerce demand, its "
+                   "upsell inside the store's own sales. It is never a third "
+                   "channel and never added to either (BR-9).")
+    return out
+
+
 def omni_penetration(da, day: D, **scope) -> Dict[str, object]:
     """#35 OMNI Penetration % = omni-attributed sales ÷ total net sales."""
     att = omni_attributed_sales(da, day, **scope)
