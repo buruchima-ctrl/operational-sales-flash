@@ -1134,6 +1134,167 @@ class SectionNavigationCase(unittest.TestCase):
             self.assertLess(os.path.getsize(p) / 1024.0, EMAIL_KB, p)
 
 
+class StoreManagerPersonaCase(unittest.TestCase):
+    """The sixth persona: a door, against its own recent form."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.site = dbfixture.site_dir()
+        cls.comp = dbfixture.companion_dir()
+        cls.obj = dbfixture.site_objects()[-1]
+        cls.date = cls.obj["date"]
+        cls.da = dbfixture.da()
+
+    def test_the_entry_page_exists_on_both_trees(self):
+        for root in (self.site, self.comp):
+            p = os.path.join(root, "store-manager", "%s.html" % self.date)
+            self.assertTrue(os.path.exists(p), p)
+
+    def test_the_entry_page_lists_every_door_grouped_by_brand(self):
+        txt = _read(os.path.join(self.site, "store-manager",
+                                 "%s.html" % self.date))
+        for b in self.obj["stores"].values():
+            self.assertIn(b["name"], txt, b["entity_id"])
+        for brand in ("Lumière", "Atelier Noir", "Botanica"):
+            self.assertIn(brand, txt, brand)
+
+    def test_the_persona_nav_carries_store_manager_everywhere(self):
+        checked = 0
+        for r, _d, fs in os.walk(self.site):
+            for f in sorted(fs):
+                if not f.endswith(".html"):
+                    continue
+                txt = _read(os.path.join(r, f))
+                m = re.search(r'<nav class="personas">.*?</nav>', txt, re.S)
+                if not m:
+                    continue
+                checked += 1
+                self.assertIn("Store Manager", m.group(0),
+                              os.path.relpath(os.path.join(r, f), self.site))
+        self.assertGreater(checked, 300)
+
+    def test_every_posted_door_landing_opens_with_its_own_blocks(self):
+        checked = 0
+        for eid, b in sorted(self.obj["stores"].items()):
+            if not b["posted"]:
+                continue
+            checked += 1
+            self.assertIn("headlines", b, eid)
+            txt = _read(os.path.join(self.site, "store", eid,
+                                     "%s.html" % self.date))
+            self.assertIn("Needs attention", txt, eid)
+            self.assertIn("Worth celebrating", txt, eid)
+        self.assertGreater(checked, 20)
+
+    def test_door_blocks_obey_the_three_and_no_double_rules(self):
+        for eid, b in sorted(self.obj["stores"].items()):
+            h = b.get("headlines")
+            if not h:
+                continue
+            self.assertLessEqual(len(h["attention"]), 3, eid)
+            self.assertLessEqual(len(h["celebration"]), 3, eid)
+            att = set(i["subject"] for i in h["attention"])
+            cel = set(i["subject"] for i in h["celebration"])
+            self.assertFalse(att & cel, "%s: %s in both" % (eid, att & cel))
+
+    def test_every_door_item_figure_equals_the_object(self):
+        checked = 0
+        for eid, b in sorted(self.obj["stores"].items()):
+            h = b.get("headlines")
+            if not h:
+                continue
+            for it in h["attention"] + h["celebration"]:
+                checked += 1
+                self.assertEqual(it["key"], eid)
+                if it["subject"] == "sales":
+                    self.assertAlmostEqual(
+                        it["actual"], self.da.net_sales_of(eid, dbfixture.ANCHOR),
+                        places=2, msg=eid)
+                if it["subject"] == "upt":
+                    self.assertAlmostEqual(
+                        it["actual"],
+                        self.da.basket(dbfixture.ANCHOR, entity_id=eid)["upt"],
+                        places=9, msg=eid)
+                if it["subject"] == "conversion":
+                    self.assertAlmostEqual(
+                        it["actual"],
+                        self.da.conversion(dbfixture.ANCHOR,
+                                           entity_id=eid)["conversion"],
+                        places=9, msg=eid)
+        self.assertGreater(checked, 20)
+
+    def test_the_baseline_rule_reproduced_independently(self):
+        """Re-derive the four same-weekday days and the mean by hand-SQL."""
+        import datetime as _dt
+        conn = dbfixture.conn()
+        for eid in ("LB-015", "LB-002"):
+            days = self.da.baseline_days(dbfixture.ANCHOR, eid)
+            want = []
+            for k in (1, 2, 3, 4):
+                d = dbfixture.ANCHOR - _dt.timedelta(days=7 * k)
+                row = conn.execute(
+                    "SELECT net_sales FROM sales_day WHERE date=? AND entity_id=?",
+                    (d.isoformat(), eid)).fetchone()
+                if row:
+                    want.append(d)
+            self.assertEqual(days, want, eid)
+            hand = sum(conn.execute(
+                "SELECT net_sales FROM sales_day WHERE date=? AND entity_id=?",
+                (d.isoformat(), eid)).fetchone()[0] for d in days) / len(days)
+            base = self.da.trailing_baseline(dbfixture.ANCHOR, eid)
+            self.assertAlmostEqual(base["net_sales"], round(hand, 2), places=2,
+                                   msg=eid)
+            # every baseline day is the same weekday as the anchor
+            for d in days:
+                self.assertEqual(d.weekday(), dbfixture.ANCHOR.weekday(), eid)
+
+    def test_items_are_ranked_by_dollar_impact_against_the_baseline(self):
+        for eid, b in sorted(self.obj["stores"].items()):
+            h = b.get("headlines")
+            if not h:
+                continue
+            for block in ("attention", "celebration"):
+                vals = [i["impact"] for i in h[block]]
+                self.assertEqual(vals, sorted(vals, reverse=True), eid)
+
+    def test_every_item_states_the_performance_frame_alongside(self):
+        for eid, b in sorted(self.obj["stores"].items()):
+            h = b.get("headlines")
+            if not h:
+                continue
+            for it in h["attention"] + h["celebration"]:
+                self.assertTrue(it["frames"], "%s %s" % (eid, it["subject"]))
+                self.assertTrue(
+                    "LY" in it["frames"] or "plan" in it["frames"]
+                    or "baseline" in it["frames"] or "shape only" in it["frames"],
+                    "%s %s: %s" % (eid, it["subject"], it["frames"]))
+
+    def test_the_baseline_and_ranking_rules_are_printed_on_the_page(self):
+        txt = _read(os.path.join(self.site, "store", "LB-015",
+                                 "%s.html" % self.date))
+        self.assertIn("same-weekday days it posted", txt)
+        self.assertIn("coaching frame leads", txt)
+        self.assertIn("scored on none", txt)
+
+    def test_the_two_planted_stories_surface_on_their_doors(self):
+        conv = self.obj["stores"][seed.CONV_STORE]["headlines"]
+        subjects = [i["subject"] for i in conv["attention"]]
+        self.assertIn("conversion", subjects)
+        attach = self.obj["stores"][seed.ATTACH_STORE]["headlines"]
+        subjects = [i["subject"] for i in attach["celebration"]]
+        self.assertIn("upt", subjects)
+
+    def test_door_landings_stay_off_the_companion(self):
+        self.assertFalse(os.path.isdir(os.path.join(self.comp, "store")))
+        entry = _read(os.path.join(self.comp, "store-manager",
+                                   "%s.html" % self.date))
+        self.assertIn(dbfixture.COMPANION_BASE, entry)
+        # every door link on the companion entry crosses to the complete site
+        for h in HREF_RE.findall(entry):
+            if "/store/" in h:
+                self.assertTrue(h.startswith(dbfixture.COMPANION_BASE), h)
+
+
 class PersonaPageCase(unittest.TestCase):
     """BR-18 on the surface: the same figure, wherever it appears."""
 

@@ -31,7 +31,7 @@ python3 run_flash.py --companion # rebuild the summary companion only
 Or check the whole thing in one command:
 
 ```bash
-python3 run_flash.py --check # seed + storyline assertions + 261 tests + determinism
+python3 run_flash.py --check # seed + storyline assertions + 273 tests + determinism
 ```
 
 The demo clock is fixed: **today is 2026-07-24** and the latest complete day is
@@ -124,6 +124,45 @@ re-derive several of them a second way.
 - **Regeneration is byte-identical.** No wall clock, no random module — every
   variation is a stable hash of (entity, date, tag). Two builds produce the same
   database and the same `render/` tree, bit for bit.
+
+### The sixth persona: Store Manager
+
+Five personas have one landing each because there is one Corporate and six
+Regions. There are twenty-nine doors, so the sixth persona's landing is a
+**door picker** at `/store-manager/<date>.html` — no auth, an entry page like
+the rest — and each door's own landing is its Store Manager page, which now
+opens with that door's **Needs attention** and **Worth celebrating** blocks
+above the existing content. One page per door per day; nothing is duplicated.
+
+Its blocks draw only on what a store manager can work on this week: their
+conversion, their basket (UPT and AST), their omni execution (pickup
+completion, upsell attach), their trading shape against their own hourly
+curve, and their category movement. The narrowing is printed on the page.
+
+**The comparison frame.** Door-grain items lead with the door against **its own
+recent form**, and state the performance frame alongside:
+
+> **The baseline** is the four prior same-weekday days on which the door
+> actually posted. Same weekday because a Saturday is not a Tuesday and
+> averaging them describes no day the door has ever traded; only days it
+> posted, because a dark day is missing, not zero. Money is a mean of those
+> days; ratios are Σ ÷ Σ over them, never a mean of daily ratios.
+
+> **Items are ranked by the absolute dollar impact of the move against that
+> baseline**, holding every other driver at today's level — so a conversion
+> item is worth `traffic × the conversion gap × today's AST`, and a UPT item
+> is worth `transactions × the UPT gap × today's AUS`.
+
+One door is noisy day to day and can beat a weak last year while sliding off
+its own form, which is why the coaching frame leads. The performance frame is
+never hidden: every item states its LY and, where the brand plans, its plan.
+
+Plan is stated on every item and **scored on none**. Ranking by plan gap would
+rank brands' planning habits against each other, and one brand of the three has
+no plan at all — its doors would never surface. A door's own form is something
+every door has.
+
+There is deliberately **no per-door digest**. The landing is the experience.
 
 ### Getting around a long page
 
@@ -303,13 +342,13 @@ database is allowed to exist. Paths are relative to the site root.
 | 6 | New-to-file dip — e-commerce | `BR-12` | New-buyer share fell more than five points below its own trailing baseline this week. | `customer/2026-07-23.html` — the CRM flag and the channel table |
 | 7 | Omni invariance demo day | `BR-9` | A heavy-BOPIS day, printing the headline with omni on and with it off. | `day/2026-07-18.html` — the green omni-invariance band |
 | 8 | Click & Reserve conversion win | `BR-10` | C&R conversion steps up sharply after a planted date and holds. | `omni/CR/2026-07-23.html` — completion rate on the created cohort |
-| 9 | Traffic up, conversion down | `BR-15` | Riverbend Square has taken more traffic and converted less of it for two weeks. | `store/LB-015/2026-07-23.html` — the KPI row and the windows table |
+| 9 | Traffic up, conversion down | `BR-15` | Riverbend Square has taken more traffic and converted less of it for two weeks. | `store/LB-015/2026-07-23.html` — top of its own Needs attention block, and the KPI row below |
 | 10 | Lost midday peak | `BR-17` | Desert Bloom Galleria's midday hours collapsed against its own trailing hourly curve. | `store/LB-018/hourly/2026-07-21.html` — Δ share against its own baseline |
 | 11 | Brand divergence inside one region | `BR-18` | In the West, Lumière comps positive while Atelier Noir comps negative on the same day. | `region/west/2026-07-23.html` — the brand rollup |
 | 12 | Canada beats plan, smaller in USD | `BR-16` | The Canadian affiliate beats plan in CAD and contributes less in USD at the seeded fixed rate. | `affiliate/CA/2026-07-23.html` — the currency band and the KPI row |
 | 13 | Three plan grains on one page | `BR-19` | The same trading day read three ways, none of them fabricated. | `day/2026-07-23.html` — "Plan, at each brand's own grain" |
 | 14 | The tree explains the conversion story | `BR-20` | A positive traffic contribution overwhelmed by a negative conversion contribution, composing exactly to the gap. | `store/LB-015/tree/2026-07-23.html` — contributions and the calculator |
-| 22 | Attach-rate winner — the basket lever | `BR-20` | The mirror image of #9. Harborlight Galleria grew sales with traffic flat and conversion steady, by selling more units per transaction. | `store/LB-002/tree/2026-07-23.html` — the AST split; `rank/upt/2026-07-23.html` — the movers table |
+| 22 | Attach-rate winner — the basket lever | `BR-20` | The mirror image of #9. Harborlight Galleria grew sales with traffic flat and conversion steady, by selling more units per transaction. | `store/LB-002/2026-07-23.html` — top of its own Worth celebrating block; `store/LB-002/tree/…` — the AST split; `rank/upt/…` — the movers table |
 | 15 | Restatement — version 2 | `BR-7` | 2026-07-20 re-issued on the settled basis with a reason string. | `day/2026-07-20-history.html` — both versions and the reason |
 | 16 | Holiday shift — July 4 | `BR-1` | Week-aligned, holiday-aligned and same-calendar-date comps all differ. | `day/2026-07-04.html` — the gold banner and the disclosures |
 | 17 | Late posters, one escalating | `BR-3` | Santa Rosa Plaza missed two days running; Granite Hill Commons missed one. | `day/2026-07-23.html` — the red completeness banner |
@@ -334,7 +373,7 @@ targets takes about ten. Every artefact is byte-identical on a rebuild.
 python3 seed.py                                ~3s    49 assertions
 python3 run_flash.py --all                    ~10s    2,660 files, 35 MB
 python3 run_flash.py --companion               ~1s      601 files, 12 MB
-python3 -m unittest discover -s tests -t .     ~13s    261 tests
+python3 -m unittest discover -s tests -t .     ~13s    273 tests
 ```
 
 ---

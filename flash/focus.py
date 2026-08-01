@@ -888,6 +888,363 @@ def _plan_movers(da, day: D, direction: str, **scope) -> List[dict]:
     return out
 
 
+# =========================================================================
+# Store Manager grain — a door against its own recent form
+# =========================================================================
+#
+# RANKING RULE for a door's own blocks, stated once:
+#
+#   items are ranked by the ABSOLUTE DOLLAR IMPACT of the move against the
+#   DOOR'S OWN TRAILING BASELINE — the four prior same-weekday days it posted
+#   (catalog.baseline_days) — holding every other driver at today's level.
+#
+# The coaching frame leads because one door is noisy day to day and can beat a
+# weak last year while sliding off its own form; the performance frame is never
+# hidden, so every item states its LY and, where the brand plans, its plan
+# beside the baseline.
+#
+# Plan is stated on every item and scored on none. Ranking by plan gap would
+# rank brands' planning habits against each other, and one brand of the three
+# has no plan at all — its doors would never surface. A door's own form is
+# something every door has.
+
+STORE_SUBJECT_LABEL = {
+    "sales": "Net sales", "conversion": "Conversion", "upt": "Basket — UPT",
+    "ast": "Basket — AST", "pickup": "BOPIS pickup execution",
+    "upsell": "BOPIS upsell capture", "hourly": "Trading shape by hour",
+    "category": "Category mix", "sku": "SKU movement",
+}
+
+
+def _sitem(subject, eid, name, severity, headline, move, frames, driver,
+           impact, href, rule, actual=None, baseline=None, ly=None):
+    return {
+        "kind": "door", "subject": subject, "key": eid, "label": name,
+        "severity": severity, "headline": headline, "move": move,
+        "frames": frames, "driver": driver,
+        "impact": round(abs(impact or 0.0), 2),
+        "impact_signed": round(impact or 0.0, 2),
+        "href": href, "rule": rule,
+        "actual": actual, "baseline": baseline, "ly": ly,
+        "entities": [eid],
+    }
+
+
+def _pct_move(actual, base):
+    return (actual / base - 1.0) if (actual is not None and base) else None
+
+
+def build_store_headlines(da, day: D, eid: str, omni_mod, customer_mod,
+                          merch_mod) -> Dict[str, object]:
+    """The two blocks a store manager's own landing opens with."""
+    from flash.catalog import THRESHOLDS
+    e = da.entity(eid)
+    row = da.sales_row(eid, day)
+    base = da.trailing_baseline(day, eid)
+    if row is None or not base.get("available"):
+        return _empty_store_headlines(base)
+
+    scope = {"entity_id": eid}
+    days = [D.fromisoformat(x) for x in base["days"]]
+    net = da.net_sales_of(eid, day)
+    basket = da.basket(day, **scope)
+    conv = da.conversion(day, **scope)
+    cmove = da.conversion_move(day, **scope)
+    ly = da.ly_date(day)
+    ly_net = da.net_sales_of(eid, ly)
+    plan = da.plan_pair(day, **scope)
+    band = THRESHOLDS["fav_unfav_band"]
+    items = []
+
+    def frames(ly_value, fmt_fn=fmt.money_compact, plan_note=None):
+        bits = ["LY %s" % (fmt_fn(ly_value) if ly_value is not None else fmt.NA)]
+        if plan_note:
+            bits.append(plan_note)
+        return " · ".join(bits)
+
+    plan_note = None
+    if da.plan_grain_of(eid) == "DAY" and plan["plan"]:
+        plan_note = "plan %s (%s)" % (fmt.money_compact(plan["plan"]),
+                                      fmt.pct_plain(plan["actual"] / plan["plan"]))
+    elif da.plan_grain_of(eid) == "WEEK":
+        ps = da.plan_status(day, **scope)
+        w = ps["week_grain"]
+        if w["week_plan"]:
+            plan_note = "week plan %s, WTD %s" % (
+                fmt.money_compact(w["week_plan"]),
+                fmt.pct_plain(w["attainment"]))
+    else:
+        plan_note = "no plan for this brand"
+
+    # -- 1. the door's money -------------------------------------------------
+    move = _pct_move(net, base["net_sales"])
+    if move is not None and abs(move) >= band:
+        items.append(_sitem(
+            "sales", eid, e["name"], "adverse" if move < 0 else "favourable",
+            "Net sales %s against its own %s"
+            % (fmt.money_compact(net), fmt.money_compact(base["net_sales"])),
+            "%s vs a %d-week same-weekday baseline of %s (%s)"
+            % (fmt.money_compact(net), base["weeks"],
+               fmt.money_compact(base["net_sales"]), fmt.pct(move)),
+            frames(ly_net, plan_note=plan_note),
+            cmove["annotation"], net - base["net_sales"],
+            "store/%s/%s.html" % (eid, day.isoformat()), "BR-6",
+            net, base["net_sales"], ly_net))
+
+    # -- 2. conversion, with its drivers (BR-22) -----------------------------
+    bmove = da.conversion_baseline_move(day, eid, da.BASELINE_WEEKS)
+    if conv["available"] and base["conversion"] and bmove["available"]:
+        gap = conv["conversion"] - base["conversion"]
+        if abs(gap) * 10000.0 >= THRESHOLDS["conversion_below_baseline_bp"]:
+            worth = (conv["traffic"] or 0) * abs(gap) * (basket["ast"] or 0.0)
+            items.append(_sitem(
+                "conversion", eid, e["name"],
+                "adverse" if gap < 0 else "favourable",
+                "Conversion %s against its own %s"
+                % (fmt.pct_plain(conv["conversion"], 2),
+                   fmt.pct_plain(base["conversion"], 2)),
+                "%s against a %d-week same-weekday baseline; worth %s on "
+                "today's traffic and AST"
+                % (bmove["annotation_bare"], base["weeks"],
+                   fmt.money_compact(worth)),
+                "vs LY %s · %s" % (cmove["annotation_bare"], plan_note or ""),
+                cmove["annotation"], worth,
+                "store/%s/tree/%s.html" % (eid, day.isoformat()), "BR-22",
+                conv["conversion"], base["conversion"], cmove["ly_conversion"]))
+
+    # -- 3. basket: UPT and AST ---------------------------------------------
+    cb = da.comp_basket(day, **scope)
+    for subject, actual, bval, thr, unit in (
+            ("upt", basket["upt"], base["upt"],
+             THRESHOLDS["upt_vs_baseline_pct"], fmt.ratio),
+            ("ast", basket["ast"], base["ast"], band, fmt.money_plain)):
+        mv = _pct_move(actual, bval)
+        if mv is None or abs(mv) < thr:
+            continue
+        if subject == "upt":
+            worth = basket["transactions"] * abs(actual - bval) * (basket["aus"] or 0.0)
+            ly_val, ly_pct = cb["ly_upt"], cb["upt_pct"]
+        else:
+            worth = basket["transactions"] * abs(actual - bval)
+            ly_val, ly_pct = cb["ly_ast"], cb["ast_pct"]
+        items.append(_sitem(
+            subject, eid, e["name"], "adverse" if mv < 0 else "favourable",
+            "%s %s against its own %s"
+            % (STORE_SUBJECT_LABEL[subject], unit(actual), unit(bval)),
+            "%s vs a %d-week same-weekday baseline of %s (%s); worth %s on "
+            "today's transactions"
+            % (unit(actual), base["weeks"], unit(bval), fmt.pct(mv),
+               fmt.money_compact(worth)),
+            "LY %s (%s) · %s" % (unit(ly_val) if ly_val else fmt.NA,
+                                 fmt.pct(ly_pct), plan_note or ""),
+            "%s on %s transactions" % (unit(actual),
+                                       fmt.count(basket["transactions"])),
+            worth, "store/%s/tree/%s.html" % (eid, day.isoformat()), "BR-20",
+            actual, bval, ly_val))
+
+    items += _store_omni_items(da, day, eid, e, days, omni_mod, base, plan_note)
+    items += _store_hourly_item(da, day, eid, e, net, plan_note)
+    items += _store_merch_items(da, day, eid, e, days, merch_mod, base, plan_note)
+
+    attention = _rank_store([i for i in items if i["severity"] == "adverse"])
+    claimed = set(i["subject"] for i in attention)
+    celebration = _rank_store([i for i in items
+                               if i["severity"] == "favourable"
+                               and i["subject"] not in claimed])
+    return {
+        "attention": attention[:HEADLINE_MAX],
+        "celebration": celebration[:HEADLINE_MAX],
+        "max_items": HEADLINE_MAX,
+        "baseline": base,
+        "kinds": ["door"],
+        "scope_rule": (
+            "Narrowed to this door — its conversion, its basket, its omni "
+            "execution, its trading shape and its category movement. The moves "
+            "a store manager can work on this week."),
+        "ranking_rule": (
+            "Ranked by the absolute dollar impact of the move against this "
+            "door's OWN trailing baseline — the %d prior same-weekday days it "
+            "posted (%s) — holding every other driver at today's level."
+            % (base["weeks"], ", ".join(base["days"]))),
+        "celebration_rule": (
+            "The coaching frame leads: one door is noisy day to day and can "
+            "beat a weak last year while sliding off its own form. The "
+            "performance frame is never hidden — every item states its LY and, "
+            "where the brand plans, its plan. Plan is stated on every item and "
+            "scored on none, because one brand of the three has no plan at all "
+            "and its doors would never surface."),
+    }
+
+
+def _empty_store_headlines(base):
+    return {"attention": [], "celebration": [], "max_items": HEADLINE_MAX,
+            "baseline": base, "kinds": ["door"],
+            "scope_rule": "Narrowed to this door.",
+            "ranking_rule": "No trailing baseline: this door has not posted "
+                            "enough same-weekday days to have a form yet.",
+            "celebration_rule": ""}
+
+
+def _store_omni_items(da, day, eid, e, days, omni_mod, base, plan_note):
+    """Pickup execution and upsell capture, each against the door's own form
+    over exactly the baseline days."""
+    from flash.catalog import THRESHOLDS
+    thr = THRESHOLDS["omni_family_vs_ly"]
+    scope = {"entity_id": eid}
+    today = omni_mod.family_day(da, "BOPIS", day, **scope)
+    created = today["all_inclusive"]["orders"]
+    rec = today["recognized"]
+    b_created = b_completed = b_picked = b_attached = 0
+    b_upsell = 0.0
+    for d in days:
+        f = omni_mod.family_day(da, "BOPIS", d, **scope)
+        mix = f["status_mix"]
+        b_created += sum(mix.values())
+        b_completed += mix.get("completed", 0)
+        b_picked += f["recognized"]["orders"]
+        b_attached += f["recognized"]["upsell_orders"]
+        b_upsell += f["recognized"]["upsell_sales"]
+    out = []
+
+    MIN_ORDERS = 3          # a rate on one order is not a rate
+    if created >= MIN_ORDERS and b_created >= MIN_ORDERS:
+        rate = today["completion_rate"]
+        b_rate = b_completed / float(b_created)
+        mv = _pct_move(rate, b_rate)
+        if mv is not None and abs(mv) >= thr:
+            worth = abs(rate - b_rate) * created * (rec["aov"] or 0.0)
+            out.append(_sitem(
+                "pickup", eid, e["name"], "adverse" if mv < 0 else "favourable",
+                "Pickup completion %s against its own %s"
+                % (fmt.pct_plain(rate), fmt.pct_plain(b_rate)),
+                "%s of today's %s created BOPIS orders completed, against %s "
+                "over the baseline days; worth %s at today's BOPIS AOV"
+                % (fmt.pct_plain(rate), fmt.count(created), fmt.pct_plain(b_rate),
+                   fmt.money_compact(worth)),
+                "LY completion %s · %s"
+                % (fmt.pct_plain(today["ly_completion_rate"]), plan_note or ""),
+                "%s picked up of %s created; recognized and all-inclusive are "
+                "different series (BR-10)"
+                % (fmt.count(rec["orders"]), fmt.count(created)),
+                worth, "omni/BOPIS/%s.html" % day.isoformat(), "BR-10",
+                rate, b_rate, today["ly_completion_rate"]))
+
+    if rec["orders"] >= MIN_ORDERS and b_picked >= MIN_ORDERS:
+        attach = rec["upsell_attach_pct"]
+        b_attach = b_attached / float(b_picked)
+        mv = _pct_move(attach, b_attach)
+        if mv is not None and abs(mv) >= thr:
+            worth = abs(rec["upsell_sales"] - (b_upsell / max(1, len(days))))
+            out.append(_sitem(
+                "upsell", eid, e["name"], "adverse" if mv < 0 else "favourable",
+                "Upsell attach %s against its own %s"
+                % (fmt.pct_plain(attach), fmt.pct_plain(b_attach)),
+                "%s of %s pickups attached %s, against a baseline attach of %s"
+                % (fmt.count(rec["upsell_orders"]), fmt.count(rec["orders"]),
+                   fmt.money_compact(rec["upsell_sales"]),
+                   fmt.pct_plain(b_attach)),
+                "baseline upsell %s a day · %s"
+                % (fmt.money_compact(b_upsell / max(1, len(days))),
+                   plan_note or ""),
+                "upsell sits inside this door's own net sales; the BOPIS order "
+                "sits inside e-commerce demand (BR-9)",
+                worth, "omni/BOPIS/%s.html" % day.isoformat(), "BR-9",
+                attach, b_attach, None))
+    return out
+
+
+def _store_hourly_item(da, day, eid, e, net, plan_note):
+    """Trading shape against the door's own trailing curve — the same four
+    same-weekday days as every other baseline here."""
+    from flash.catalog import THRESHOLDS
+    thr = THRESHOLDS["hourly_shape_share_pts"]
+    prof = da.hourly_profile(eid, day, weeks=da.BASELINE_WEEKS)
+    if not prof.get("weeks") or not prof.get("delta_share"):
+        return []
+    deltas = prof["delta_share"]
+    moved = sum(abs(v) for v in deltas.values()) / 2.0
+    if moved < thr:
+        return []
+    gained = sorted(deltas.items(), key=lambda kv: -kv[1])[:2]
+    lost = sorted(deltas.items(), key=lambda kv: kv[1])[:2]
+    worth = moved * (net or 0.0)
+    # A reshaped day is neither good nor bad on its own — it is a staffing
+    # question. It is filed as attention because that is where a question goes.
+    return [_sitem(
+        "hourly", eid, e["name"], "adverse",
+        "Trading shape moved %s of the day between hours"
+        % fmt.pct_plain(moved),
+        "%s of the day's takings sat in different hours than this door's own "
+        "%d-week curve — %s worth of trade"
+        % (fmt.pct_plain(moved), prof["weeks"], fmt.money_compact(worth)),
+        "shape only: the day's total is unchanged, and hourly is intraday and "
+        "unaudited (BR-17)",
+        "gained %s; lost %s"
+        % (", ".join("%02d:00 %s" % (h, fmt.pct(v)) for h, v in gained),
+           ", ".join("%02d:00 %s" % (h, fmt.pct(v)) for h, v in lost)),
+        worth, "store/%s/hourly/%s.html" % (eid, day.isoformat()), "BR-17",
+        moved, 0.0, None)]
+
+
+def _store_merch_items(da, day, eid, e, days, merch_mod, base, plan_note):
+    """The door's own biggest category move against its own baseline."""
+    from flash.catalog import THRESHOLDS
+    band = THRESHOLDS["fav_unfav_band"]
+    scope = {"entity_id": eid}
+    today = merch_mod.category_day(da, day, **scope)
+    if not today.get("available"):
+        return []
+    hist = {}
+    n = 0
+    for d in days:
+        c = merch_mod.category_day(da, d, **scope)
+        if not c.get("available"):
+            continue
+        n += 1
+        for r in c["categories"]:
+            hist[r["category"]] = hist.get(r["category"], 0.0) + r["net_sales"]
+    if not n:
+        return []
+    best = None
+    for r in today["categories"]:
+        bval = hist.get(r["category"], 0.0) / n
+        mv = _pct_move(r["net_sales"], bval)
+        if mv is None or abs(mv) < band:
+            continue
+        worth = abs(r["net_sales"] - bval)
+        if best is None or worth > best[0]:
+            best = (worth, r, bval, mv)
+    if best is None:
+        return []
+    worth, r, bval, mv = best
+    movers = merch_mod.sku_movers(da, day, n=3, category=r["category"], **scope)
+    named = movers["bottom"] if mv < 0 else movers["top"]
+    return [_sitem(
+        "category", eid, e["name"], "adverse" if mv < 0 else "favourable",
+        "%s %s against its own %s"
+        % (r["category"], fmt.money_compact(r["net_sales"]),
+           fmt.money_compact(bval)),
+        "%s vs a %d-week same-weekday baseline of %s (%s); %s of the day's mix"
+        % (fmt.money_compact(r["net_sales"]), n, fmt.money_compact(bval),
+           fmt.pct(mv), fmt.pct_plain(r["mix_pct"])),
+        "comp %s vs LY · %s" % (fmt.pct(r["comp_pct"]), plan_note or ""),
+        "; ".join("%s %s" % (x["name"], fmt.money_signed(x["delta"]))
+                  for x in named[:3]) or "no SKU detail",
+        worth, "category/%s/%s.html" % (_slug(r["category"]), day.isoformat()),
+        "BR-11", r["net_sales"], bval, r["comp_ly"])]
+
+
+def _rank_store(items):
+    items = sorted(items, key=lambda i: (-i["impact"], i["subject"]))
+    out, seen = [], set()
+    for it in items:
+        if it["subject"] in seen:
+            continue
+        seen.add(it["subject"])
+        out.append(it)
+    return out
+
+
 def _channel_label(key: str) -> str:
     return {"STORE": "Stores", "ECOM": "E-commerce"}.get(key, key)
 

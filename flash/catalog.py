@@ -67,6 +67,8 @@ THRESHOLDS = {
     # direction — below it is a coaching signal, above it is an attach-rate
     # winner worth naming.
     "upt_vs_baseline_pct": 0.05,
+    # Store-manager grain: a door against its own recent form.
+    "hourly_shape_share_pts": 0.05,   # share of the day moved between hours
     "fav_unfav_band": 0.05,           # ±5% fav / within / unfav key
 }
 
@@ -1056,6 +1058,42 @@ class DataAccess(object):
             "identity_gap": round((1.0 + x_pct) / (1.0 + t_pct) - ratio, 12),
         }
 
+    def conversion_baseline_move(self, day: D, entity_id: str,
+                                 weeks: int = 4) -> Dict[str, object]:
+        """BR-22 in the coaching frame: the door's conversion against its own
+        trailing baseline, carrying the same two drivers.
+
+        A basis-point figure is a conversion movement whatever it is measured
+        against, so the baseline frame gets its drivers too — measured against
+        the same baseline, never mixed with the LY frame."""
+        days = self.baseline_days(day, entity_id, weeks)
+        row = self.sales_row(entity_id, day)
+        traffic = self.traffic_of(entity_id, day)
+        b_t = b_x = 0
+        for d in days:
+            t = self.traffic_of(entity_id, d)
+            if t:
+                b_t += t
+                b_x += self.sales_row(entity_id, d)["transactions"]
+        if row is None or not traffic or not b_t:
+            return {"available": False, "bps": None, "weeks": len(days),
+                    "annotation": "conversion unavailable — no traffic posted",
+                    "annotation_bare": "unavailable — no traffic posted"}
+        ty, base = row["transactions"] / float(traffic), b_x / float(b_t)
+        b_traffic = b_t / float(len(days))
+        b_txns = b_x / float(len(days))
+        t_pct = traffic / b_traffic - 1.0
+        x_pct = row["transactions"] / b_txns - 1.0
+        bps = round((ty - base) * 10000.0, 1)
+        bare = "%s (traffic %s, txns %s)" % (_bp(bps), fmt.pct(t_pct),
+                                             fmt.pct(x_pct))
+        return {"available": True, "bps": bps, "weeks": len(days),
+                "ty_conversion": ty, "baseline_conversion": base,
+                "traffic_pct": t_pct, "txns_pct": x_pct,
+                "annotation": "conversion " + bare, "annotation_bare": bare,
+                "identity_gap": round((1.0 + x_pct) / (1.0 + t_pct)
+                                      - (ty / base), 12)}
+
     def conversion_window_move(self, day: D, window: str,
                                **scope) -> Dict[str, object]:
         """The same annotation over a fiscal window — the form a coaching line
@@ -1599,6 +1637,81 @@ class DataAccess(object):
         if not vals:
             return None
         return round(sum(vals) / len(vals), 2)
+
+    # =====================================================================
+    # A door's own recent form — the coaching baseline
+    # =====================================================================
+
+    BASELINE_WEEKS = 4
+
+    def baseline_days(self, day: D, entity_id: str,
+                      weeks: int = BASELINE_WEEKS) -> List[D]:
+        """THE definition of "this door's own recent form", in one place.
+
+        The four prior SAME-WEEKDAY days on which the door actually posted.
+        Same weekday because a Saturday is not a Tuesday and averaging them
+        produces a number that describes no day the door has ever traded; only
+        days it posted, because a dark day is missing, not zero (BR-3).
+
+        Everything that ranks a door against itself — sales, conversion,
+        basket, omni execution, category mix, hourly shape — aggregates over
+        exactly this list, so "against its own baseline" means one thing across
+        the whole product."""
+        out = []
+        for k in range(1, weeks + 1):
+            d = day - dt.timedelta(days=7 * k)
+            try:
+                self.cal_row(d)
+            except CatalogError:
+                continue
+            if self.sales_row(entity_id, d) is not None:
+                out.append(d)
+        return out
+
+    def trailing_baseline(self, day: D, entity_id: str,
+                          weeks: int = BASELINE_WEEKS) -> Dict[str, object]:
+        """The door's own form on the metrics a store manager can move.
+
+        Money is a mean of the days. Ratios are Σ ÷ Σ over the same days,
+        never a mean of daily ratios — a mean weights a quiet Tuesday like a
+        Saturday and answers a question nobody asked."""
+        days = self.baseline_days(day, entity_id, weeks)
+        if not days:
+            return {"weeks": 0, "days": [], "available": False}
+        net = txns = units = 0.0
+        traffic, traffic_days = 0, 0
+        for d in days:
+            row = self.sales_row(entity_id, d)
+            net += self.net_sales_of(entity_id, d)
+            txns += row["transactions"]
+            units += row["units"]
+            t = self.traffic_of(entity_id, d)
+            if t:
+                traffic += t
+                traffic_days += 1
+        n = float(len(days))
+
+        def ratio(a_, b_):
+            return (a_ / b_) if b_ else None
+
+        # conversion needs the transactions of the SAME days that had traffic
+        conv_txns = conv_traffic = 0
+        for d in days:
+            t = self.traffic_of(entity_id, d)
+            if t:
+                conv_traffic += t
+                conv_txns += self.sales_row(entity_id, d)["transactions"]
+        return {
+            "available": True, "weeks": len(days), "days": [d.isoformat() for d in days],
+            "net_sales": round(net / n, 2),
+            "transactions": txns / n, "units": units / n,
+            "traffic": (traffic / traffic_days) if traffic_days else None,
+            "conversion": ratio(float(conv_txns), float(conv_traffic)),
+            "upt": ratio(units, txns), "ast": ratio(net, txns),
+            "aus": ratio(net, units),
+            "basis": "mean of the %d prior same-weekday days this door posted; "
+                     "ratios aggregated Σ ÷ Σ over those days" % len(days),
+        }
 
     def late_posters(self, day: D, lookback_days: int = 1, **scope) -> List[dict]:
         """BR-3 late-poster escalation: stores unposted on `day`, flagged as

@@ -195,6 +195,7 @@ def _persona_nav(depth: int, date_iso: str, current: str = "") -> str:
              ("Regions", "region/northeast/%s.html" % date_iso, "region"),
              ("Affiliates", "affiliate/US/%s.html" % date_iso, "affiliate"),
              ("Field Leadership", "field/%s.html" % date_iso, "field"),
+             ("Store Manager", "store-manager/%s.html" % date_iso, "store"),
              ("Day flash", "day/%s.html" % date_iso, "day"),
              ("Archive", "index.html", "index")]
     out = ['<nav class="personas">']
@@ -1350,6 +1351,75 @@ def render_corp_trends(obj, series, depth: int) -> str:
 # Drill pages — district, door, hourly, tree, category, SKU
 # =========================================================================
 
+def render_store_entry(obj, nav) -> str:
+    """The Store Manager entry page: pick your door.
+
+    The other five personas each have one landing because there is one
+    Corporate and six Regions. There are twenty-nine doors, so the sixth
+    persona's landing is a door picker — no auth, an entry page like the rest
+    (PRD §6). Doors are grouped by brand and then region, because a store
+    manager knows their brand before they know their district code."""
+    depth = nav["depth"]
+    date_iso = obj["date"]
+    d = obj["display"]
+    o = [_persona_nav(depth, date_iso, "store"), _companion_band(obj),
+         _crumbs(depth, nav["crumbs"]),
+         _header("Store Manager view · %s" % obj["product"],
+                 "Pick your door — %s" % d["date_long"],
+                 "Opens on: your own door · hourly · KPI tree · omni · "
+                 "customer · %s" % esc(d["week_label"]))]
+    o.append(_band("note", "One page per door per day",
+                   "Each door's landing opens on what that door can act on "
+                   "today — its conversion, its basket, its omni execution, "
+                   "its trading shape and its category movement, each against "
+                   "the door's own recent form — and then carries the full "
+                   "Store Manager page beneath it."))
+
+    stores = [b for b in obj["stores"].values()]
+    by_brand = {}
+    for b in stores:
+        by_brand.setdefault(b["brand_id"] or "ECOM", []).append(b)
+
+    ranked = {r["entity_id"]: i + 1
+              for i, r in enumerate(obj["ranks"]["net_sales"]["top"])}
+    for brand_id in sorted(by_brand):
+        brand_name = next((b["brand_name"] for b in by_brand[brand_id]
+                           if b["brand_name"]), brand_id)
+        o.append("<h2>%s</h2>" % esc(brand_name or brand_id))
+        rows = []
+        for b in sorted(by_brand[brand_id],
+                        key=lambda x: (x["region"], x["entity_id"])):
+            eid = b["entity_id"]
+            first = _link(depth, "store/%s/%s.html" % (eid, date_iso), b["name"])
+            if not b["posted"]:
+                rows.append((first, b["region"], b["district_id"] or "—",
+                             "not posted", "", "", "", ""))
+                continue
+            hd = b["headline"]
+            hl = b.get("headlines") or {"attention": [], "celebration": []}
+            top = (hl["attention"][0]["headline"] if hl["attention"]
+                   else (hl["celebration"][0]["headline"]
+                         if hl["celebration"] else "nothing over threshold"))
+            rows.append((
+                first, b["region"], b["district_id"] or "—",
+                fmt.money_compact(hd["net_sales"]),
+                ("raw", "%s %s" % (_tri(hd["comp_pct"]),
+                                   esc(fmt.pct(hd["comp_pct"])))),
+                (fmt.pct_plain(hd["conversion"], 2)
+                 if hd["conversion_available"] else "unavailable"),
+                fmt.ratio(hd["upt"]),
+                ("raw", esc(top))))
+        o.append(_table(["Door", "Region", "District", "Net sales", "% to LY",
+                         "Conversion", "UPT", "Top of its own list"], rows))
+    o.append(_recon("Every figure here is the same computed object each door's "
+                    "own landing reads, and the same one the day flash and the "
+                    "extract read. Only the scope differs (BR-18)."))
+    o.append(_legend())
+    o.append(_footer())
+    return _page("Store Manager — pick your door, %s" % d["date_short"],
+                 "\n".join(o), depth=depth)
+
+
 def render_district(obj, district_id: str, nav) -> str:
     depth = nav["depth"]
     date_iso = obj["date"]
@@ -1410,8 +1480,8 @@ def render_store(obj, entity_id: str, nav) -> str:
     d = obj["display"]
     o = [_persona_nav(depth, date_iso, "field"), _crumbs(depth, nav["crumbs"])]
     o.append(_header(
-        "Store Manager · %s%s" % (b["brand_name"] or "E-commerce",
-                                  " · %s" % b["region"]),
+        "Store Manager view · %s%s" % (b["brand_name"] or "E-commerce",
+                                       " · %s" % b["region"]),
         "%s — %s" % (b["name"], d["date_long"]),
         "#%s · %s, %s · district %s · %s · plan grain %s%s"
         % (b["store_number"], esc(b["city"] or ""), esc(b["state_province"] or ""),
@@ -1455,6 +1525,9 @@ def render_store(obj, entity_id: str, nav) -> str:
 
     o.append(_currency_band(obj, b["currency"], b["net_sales_local"],
                             h["net_sales"], what=b["name"]))
+
+    if b.get("headlines"):
+        o.append(_headline_blocks(depth, b["headlines"], linked=True))
 
     o.append("<h2>Hours — the day's shape</h2>")
     o.append(_hour_bars(b["hourly"]["hours"], "traffic"))
@@ -2749,6 +2822,11 @@ def _build_companion_panels(out_dir: str, obj, trend_series) -> List[str]:
                "trend_series": trend_series}
         written.append(write(os.path.join(out_dir, path),
                              render_persona(obj, key, nav)))
+    written.append(write(
+        os.path.join(out_dir, "store-manager", "%s.html" % date_iso),
+        render_store_entry(obj, {"depth": 1,
+                                 "crumbs": _crumb_base(date_iso, short)
+                                 + [("Store Manager", None)]})))
     for fam in obj["omni"]["family_order"]:
         nav = {"depth": 2, "crumbs": _crumb_base(date_iso, short)
                + [(OMNI_TITLES[fam], None)]}
@@ -2864,6 +2942,13 @@ def _build_deep(out_dir: str, obj, trend_series) -> List[str]:
                "trend_series": trend_series}
         written.append(write(os.path.join(out_dir, path),
                              render_persona(obj, key, nav)))
+
+    # the Store Manager entry page — the sixth persona's door picker
+    written.append(write(
+        os.path.join(out_dir, "store-manager", "%s.html" % date_iso),
+        render_store_entry(obj, {"depth": 1,
+                                 "crumbs": _crumb_base(date_iso, short)
+                                 + [("Store Manager", None)]})))
 
     # districts
     for row in obj["slices"]["district"]:

@@ -42,7 +42,7 @@ from flash import fmt, merch, narrative, omni
 from flash.calendar import ly_holiday_aligned_date
 from flash.catalog import THRESHOLDS, reconcile_display
 from flash.focus import (ACTIONABLE_KINDS, build_exceptions, build_focus,
-                        build_headlines, _slug)
+                        build_headlines, build_store_headlines, _slug)
 
 D = dt.date
 
@@ -600,7 +600,12 @@ PERSONA_MATRIX = {
 PERSONA_LABELS = {
     "corporate": "Corporate", "brand": "Brand", "region": "Region",
     "affiliate": "Affiliate", "field": "Field Leadership",
+    "store": "Store Manager",
 }
+# The sixth persona is a door, and there are twenty-nine of them, so its
+# landing pages are the per-door blocks in obj["stores"] rather than thirteen
+# more entries here. The entry page is the door picker.
+STORE_PERSONA_SCOPE = "Their own door · hourly · KPI tree · omni · customer"
 
 
 def _persona_specs(da) -> List[dict]:
@@ -794,6 +799,8 @@ def _store_blocks(da, day: D) -> Dict[str, object]:
                             for w in ("WTD", "MTD", "QTD")}
         block["plan_status"] = da.plan_status(day, **scope)
         block["conversion_move"] = da.conversion_move(day, **scope)
+        block["headlines"] = build_store_headlines(da, day, eid, omni,
+                                                   customer_mod, merch)
         block["hourly"] = da.hourly_series(eid, day)
         block["hourly_profile"] = da.hourly_profile(eid, day, weeks=4)
         block["tree"] = da.kpi_tree(eid, day)
