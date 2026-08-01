@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>KPI tree — Lumiere Cypress Crossing, Mon Jul 13</title>
+<link rel="stylesheet" href="../../../assets/site.css">
+</head>
+<body>
+<div class="wrap">
+<nav class="personas"><a class="" href="../../../corporate/2026-07-13.html">Corporate</a><a class="" href="../../../brand/LUM/2026-07-13.html">Brands</a><a class="" href="../../../region/northeast/2026-07-13.html">Regions</a><a class="" href="../../../affiliate/US/2026-07-13.html">Affiliates</a><a class="on" href="../../../field/2026-07-13.html">Field Leadership</a><a class="" href="../../../store-manager/2026-07-13.html">Store Manager</a><a class="" href="../../../day/2026-07-13.html">Day flash</a><a class="" href="../../../index.html">Archive</a></nav>
+<div class="crumbs"><a href="../../../index.html">Archive</a><span class="sep">›</span><a href="../../../day/2026-07-13.html">Mon Jul 13</a><span class="sep">›</span><a href="../../../region/southwest/2026-07-13.html">Southwest</a><span class="sep">›</span><a href="../../../district/SW-2/2026-07-13.html">SW-2</a><span class="sep">›</span><a href="../../../store/LB-020/2026-07-13.html">Lumiere Cypress Crossing</a><span class="sep">›</span>KPI tree</div>
+<header class="top"><div class="eyebrow">KPI tree · Southwest</div><h1>Lumiere Cypress Crossing — Monday, July 13, 2026</h1><div class="meta">Sales = Traffic × Conversion × AST · AST = AUS × UPT</div></header>
+
+<div class="tree"><div class="node"><div class="l">Traffic</div><div class="v">277</div><div class="c soft">LY 262</div><div class="c good">+$167.31 to the gap</div></div><div class="node op">×</div><div class="node"><div class="l">Conversion</div><div class="v">18.77%</div><div class="c soft">LY 19.08%</div><div class="c bad">−$50.42 to the gap</div></div><div class="node op">×</div><div class="node"><div class="l">AST</div><div class="v">$59.18</div><div class="c soft">LY $58.45</div><div class="c good">+$38.25 to the gap</div></div><div class="node op">=</div><div class="node"><div class="l">Net sales</div><div class="v">$3,077.48</div><div class="c soft">LY $2,922.34</div><div class="c good">gap +$155.14</div></div></div><div class="tree"><div class="node op">↳</div><div class="node"><div class="l">AUS</div><div class="v">$31.40</div><div class="c soft">LY $30.13</div><div class="c good">+$128.69 to the gap</div></div><div class="node op">×</div><div class="node"><div class="l">UPT</div><div class="v">1.88</div><div class="c soft">LY 1.94</div><div class="c bad">−$90.44 to the gap</div></div></div><div class="recon">Traffic +$167.31, conversion −$50.42 and AST +$38.25 sum to +$155.14 — the sales gap, to the cent. Residual interaction $0.00. sequential (waterfall) attribution, fixed driver order traffic -&gt; conversion -&gt; AST; AST split AUS -&gt; UPT</div>
+<h2 id="driver-contributions">Driver contributions</h2>
+<div class="scroll"><table><tr><th title="sequential attribution, fixed order traffic → conversion → AST">Driver</th><th>Contribution to the gap</th></tr><tr><td class="">TRAFFIC</td><td class="">+$167.31</td></tr><tr><td class="">CONVERSION</td><td class="bad">−$50.42</td></tr><tr><td class="">AST</td><td class="">+$38.25</td></tr><tr class="tot"><td class="">Sum = the sales gap</td><td class="">+$155.14</td></tr><tr><td class="">Residual interaction</td><td class="">$0.00</td></tr></table></div>
+<div class="scroll"><table><tr><th>AST splits into</th><th>Contribution to the gap</th></tr><tr><td class="">AUS</td><td class="">+$128.69</td></tr><tr><td class="">UPT</td><td class="bad">−$90.44</td></tr><tr class="tot"><td class="">Sum = the AST contribution</td><td class="">+$38.25</td></tr></table></div>
+<div class="recon">Sequential attribution telescopes exactly, so the residual is zero by construction — it is computed and shown rather than assumed (BR-20). Both columns above are shown to the cent so that they sum to their own totals as printed.</div>
+<h2 id="what-if-the-calculator">What if — the calculator</h2>
+<script id="tree-payload" type="application/json">{"ast": 59.182307692307695, "aus": 31.402857142857144, "conversion": 0.18772563176895307, "converted": false, "currency": "USD", "display": {"ast": "$59.18", "conversion": "18.77%", "ly_net_sales": "$2.9K", "net_sales": "$3.1K", "traffic": "277"}, "fx_disclosure": "Reporting currency", "fx_units_per_usd": 1.0, "local_currency": "USD", "ly_ast": 58.4468, "ly_aus": 30.127216494845364, "ly_conversion": 0.19083969465648856, "ly_net_sales": 2922.34, "ly_net_sales_local": 2922.34, "ly_traffic": 262.0, "ly_upt": 1.94, "model": "sales = traffic x conversion x AST", "net_sales": 3077.48, "net_sales_local": 3077.48, "traffic": 277.0, "upt": 1.8846153846153846}</script><div class="calcbox"><div class="chk" id="wi-check">Checking the calculator against the catalog…</div><label for="wi-traffic">Traffic <output id="wi-traffic-out">+0%</output> → <span id="wi-traffic-val" class="calc"></span></label><input type="range" id="wi-traffic" min="-50" max="50" step="1" value="0"><label for="wi-conversion">Conversion <output id="wi-conversion-out">+0%</output> → <span id="wi-conversion-val" class="calc"></span></label><input type="range" id="wi-conversion" min="-50" max="50" step="1" value="0"><label for="wi-ast">AST <output id="wi-ast-out">+0%</output> → <span id="wi-ast-val" class="calc"></span></label><input type="range" id="wi-ast" min="-50" max="50" step="1" value="0"><div class="out" id="wi-sales">—</div><div class="chk"><span id="wi-vs-actual"></span> · <span id="wi-vs-ly"></span></div><p style="margin:10px 0 0"><button type="button" id="wi-solve">Solve: what conversion matches LY?</button> <button type="button" id="wi-reset">Reset</button></p><div class="chk" id="wi-solved"></div><div class="chk">This calculator holds no formula. It is handed the catalog's own driver values and evaluates the catalog's own identity; it verifies that it reproduces the catalog's figure before it will let you touch a slider (BR-20).</div></div>
+<p class="key"><a href="../../../store/LB-020/2026-07-13.html">← Store Manager page</a> · <a href="../../../store/LB-020/hourly/2026-07-13.html">hourly view</a></p>
+<div class="legend">Colour tokens: <i class="gold">gold</i> = an input the business asserted · <i class="blue">blue</i> = a figure presented as given · <i class="calc">green</i> = calculated here. Dotted underline = hover for the formula.</div>
+<footer>Every figure on this site is computed once in the metric catalog and rendered to the site, the morning digest and the door extract from one object (BR-5 / BR-13). Generated from seeded data; no live systems were queried. Demo build.</footer>
+</div>
+<script>
+/* The what-if calculator.
+   It contains NO formula of its own. The identity below is the catalog's,
+   emitted into the page as data in `model`, and every input value is a number
+   the catalog computed. The only arithmetic here is that identity, evaluated,
+   plus one rearrangement of it to solve for conversion — the question the
+   original dashboard doc asked ("what does conversion have to be to hit target
+   on negative traffic?").
+   On load it checks its own arithmetic against the catalog's answer and
+   refuses to pretend if they disagree. */
+(function () {
+  var el = document.getElementById("tree-payload");
+  if (!el) { return; }
+  var P = JSON.parse(el.textContent);
+
+  function sales(traffic, conversion, ast) { return traffic * conversion * ast; }
+  function conversionFor(target, traffic, ast) { return target / (traffic * ast); }
+
+  function money(v) {
+    var s = Math.abs(v) >= 1000000 ? "$" + (Math.abs(v) / 1000000).toFixed(2) + "M"
+          : Math.abs(v) >= 1000 ? "$" + (Math.abs(v) / 1000).toFixed(1) + "K"
+          : "$" + Math.round(Math.abs(v));
+    return (v < 0 ? "\u2212" : "") + s;
+  }
+  function signed(v) { return (v >= 0 ? "+" : "") + money(v); }
+  function pc(v) { return (v * 100).toFixed(2) + "%"; }
+
+  var check = sales(P.traffic, P.conversion, P.ast);
+  var agrees = Math.abs(check - P.net_sales) < 0.01;
+  document.getElementById("wi-check").textContent = agrees
+    ? "Self-check: traffic x conversion x AST reproduces the catalog's "
+      + P.display.net_sales + " exactly. " + P.model
+    : "SELF-CHECK FAILED: this page computes " + check
+      + " where the catalog says " + P.net_sales + ". Do not trust the sliders.";
+  if (!agrees) { return; }
+
+  var ids = ["traffic", "conversion", "ast"];
+  var inputs = {};
+  ids.forEach(function (k) { inputs[k] = document.getElementById("wi-" + k); });
+
+  function scenario() {
+    var t = P.traffic * (1 + inputs.traffic.value / 100);
+    var c = P.conversion * (1 + inputs.conversion.value / 100);
+    var a = P.ast * (1 + inputs.ast.value / 100);
+    return { t: t, c: c, a: a, s: sales(t, c, a) };
+  }
+
+  function paint() {
+    var s = scenario();
+    ids.forEach(function (k) {
+      document.getElementById("wi-" + k + "-out").textContent =
+        (inputs[k].value >= 0 ? "+" : "") + inputs[k].value + "%";
+    });
+    document.getElementById("wi-traffic-val").textContent = Math.round(s.t);
+    document.getElementById("wi-conversion-val").textContent = pc(s.c);
+    document.getElementById("wi-ast-val").textContent = money(s.a);
+    document.getElementById("wi-sales").textContent = money(s.s);
+    document.getElementById("wi-vs-actual").textContent =
+      signed(s.s - P.net_sales) + " vs today";
+    document.getElementById("wi-vs-ly").textContent =
+      signed(s.s - P.ly_net_sales) + " vs LY (" + P.display.ly_net_sales + ")";
+  }
+
+  document.getElementById("wi-solve").addEventListener("click", function () {
+    var t = P.traffic * (1 + inputs.traffic.value / 100);
+    var a = P.ast * (1 + inputs.ast.value / 100);
+    var needed = conversionFor(P.ly_net_sales, t, a);
+    var pct = Math.round((needed / P.conversion - 1) * 1000) / 10;
+    inputs.conversion.value = Math.max(-50, Math.min(50, pct));
+    paint();
+    document.getElementById("wi-solved").textContent =
+      "To match LY (" + P.display.ly_net_sales + ") on that traffic and AST, "
+      + "conversion has to reach " + pc(needed) + " — today it is "
+      + P.display.conversion + ".";
+  });
+
+  ids.forEach(function (k) { inputs[k].addEventListener("input", paint); });
+  document.getElementById("wi-reset").addEventListener("click", function () {
+    ids.forEach(function (k) { inputs[k].value = 0; });
+    document.getElementById("wi-solved").textContent = "";
+    paint();
+  });
+  paint();
+})();
+</script>
+</body>
+</html>
